@@ -1,15 +1,16 @@
 export const VoxelMeshVertexConstants = {
-  VertexFloatSize: 24,
-  VertexByteSize: 24 * 4,
+  VertexFloatSize: 28,
+  VertexByteSize: 28 * 4,
   PositionOffset: 0,
   NormalOffset: 4,
   TextureIndexOffset: 8,
   UVOffset: 12,
   ColorOffset: 14,
   VoxelDataOFfset: 18,
+  MetadataOffset: 22,
 };
 export class VoxelMeshVertexStructCursor {
-  static VertexFloatSize = 24;
+  static VertexFloatSize = 28;
   static VertexByteSize = this.VertexFloatSize * 4;
   static PositionOffset = 0;
   static NormalOffset = 4;
@@ -17,6 +18,7 @@ export class VoxelMeshVertexStructCursor {
   static UVOffset = 12;
   static ColorOffset = 14;
   static VoxelDataOFfset = 18;
+  static MetadataOffset = 22;
 
   // position
   get positionX() {
@@ -119,6 +121,50 @@ export class VoxelMeshVertexStructCursor {
   set voxelDataW(value: number) {
     this.data[
       this.trueIndex + VoxelMeshVertexStructCursor.VoxelDataOFfset + 3
+    ] = value;
+  }
+
+  // metadata
+  get metadataX() {
+    return this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset
+    ];
+  }
+  set metadataX(value: number) {
+    this.data[this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset] =
+      value;
+  }
+
+  get metadataY() {
+    return this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 1
+    ];
+  }
+  set metadataY(value: number) {
+    this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 1
+    ] = value;
+  }
+
+  get metadataZ() {
+    return this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 2
+    ];
+  }
+  set metadataZ(value: number) {
+    this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 2
+    ] = value;
+  }
+
+  get metadataW() {
+    return this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 3
+    ];
+  }
+  set metadataW(value: number) {
+    this.data[
+      this.trueIndex + VoxelMeshVertexStructCursor.MetadataOffset + 3
     ] = value;
   }
 
@@ -231,6 +277,12 @@ export class VoxelMeshVertexStructCursor {
       ],
       uv: [this.uvX, this.uvY],
       color: [this.colorR, this.colorG, this.colorB],
+      metadata: [
+        this.metadataX,
+        this.metadataY,
+        this.metadataZ,
+        this.metadataW,
+      ],
     };
   }
 }

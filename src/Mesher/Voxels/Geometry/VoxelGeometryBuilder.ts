@@ -11,6 +11,30 @@ const vector1ShaderData = Vector4Like.Create();
 const vector2ShaderData = Vector4Like.Create();
 const vector3ShaderData = Vector4Like.Create();
 const vector4ShaderData = Vector4Like.Create();
+const vector1Metadata = Vector4Like.Create();
+const vector2Metadata = Vector4Like.Create();
+const vector3Metadata = Vector4Like.Create();
+const vector4Metadata = Vector4Like.Create();
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function createSurfaceMetadata(
+  normal: Vector3Like,
+  aoValue: number,
+  target: Vector4Like
+) {
+  const topExposure = clamp01(normal.y);
+  const slope = clamp01(1 - Math.abs(normal.y));
+  const cavity = clamp01(aoValue / 3);
+  target.x = topExposure;
+  target.y = slope;
+  target.z = cavity;
+  target.w = normal.y > 0.5 ? 1 : 0;
+  return target;
+}
+
 export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   if (!builder.mesh) return;
 
@@ -41,6 +65,11 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
     QuadVerticies.TopRight,
     vector1ShaderData
   );
+  const topRightMetadata = createSurfaceMetadata(
+    topRightNor,
+    worldAO.vertices[QuadVerticies.TopRight],
+    vector1Metadata
+  );
   const topLeftVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
     worldLight.vertices[QuadVerticies.TopLeft],
@@ -54,6 +83,11 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
     QuadVerticies.TopLeft,
     vector2ShaderData
   );
+  const topLeftMetadata = createSurfaceMetadata(
+    topLeftNor,
+    worldAO.vertices[QuadVerticies.TopLeft],
+    vector2Metadata
+  );
   const bottomLeftVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
     worldLight.vertices[QuadVerticies.TopLeft],
@@ -66,6 +100,11 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
     animData.vertices[QuadVerticies.BottomLeft],
     QuadVerticies.BottomLeft,
     vector3ShaderData
+  );
+  const bottomLeftMetadata = createSurfaceMetadata(
+    bottomLeftNor,
+    worldAO.vertices[QuadVerticies.BottomLeft],
+    vector3Metadata
   );
 
   const indices = builder.mesh!.indices;
@@ -85,6 +124,7 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
       topRightNor,
       tri.uvs.vertices[QuadVerticies.TopRight],
       topRightVoxelData,
+      topRightMetadata,
       texture,
       overlayTextures
     );
@@ -98,6 +138,7 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
       topLeftNor,
       tri.uvs.vertices[QuadVerticies.TopLeft],
       topLeftVoxelData,
+      topLeftMetadata,
       texture,
       overlayTextures
     );
@@ -110,6 +151,7 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
       bottomLeftNor,
       tri.uvs.vertices[QuadVerticies.BottomLeft],
       bottomLeftVoxelData,
+      bottomLeftMetadata,
       texture,
       overlayTextures
     );
@@ -142,8 +184,12 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   builder.vars.reset();
 }
 
-export function addVoxelQuad(builder: VoxelModelBuilder, quad: Quad) {
-  if (!builder.mesh) return;
+export function addVoxelQuad(
+  builder: VoxelModelBuilder,
+  quad: Quad,
+  targetBuilder: VoxelModelBuilder = builder
+) {
+  if (!targetBuilder.mesh) return;
 
   const origin = builder.origin;
   const worldLight = builder.vars.light;
@@ -211,59 +257,85 @@ export function addVoxelQuad(builder: VoxelModelBuilder, quad: Quad) {
     QuadVerticies.BottomRight,
     vector4ShaderData
   );
-  const indices = builder.mesh!.indices;
-  let indIndex = builder.mesh.indicieCount;
+  const topRightMetadata = createSurfaceMetadata(
+    topRightNor,
+    worldAO.vertices[QuadVerticies.TopRight],
+    vector1Metadata
+  );
+  const topLeftMetadata = createSurfaceMetadata(
+    topLeftNor,
+    worldAO.vertices[QuadVerticies.TopLeft],
+    vector2Metadata
+  );
+  const bottomLeftMetadata = createSurfaceMetadata(
+    bottomLeftNor,
+    worldAO.vertices[QuadVerticies.BottomLeft],
+    vector3Metadata
+  );
+  const bottomRightMetadata = createSurfaceMetadata(
+    bottomRightNor,
+    worldAO.vertices[QuadVerticies.BottomRight],
+    vector4Metadata
+  );
+  const indices = targetBuilder.mesh!.indices;
+  let indIndex = targetBuilder.mesh.indicieCount;
 
-  const baseIndex = builder.mesh.vertexCount;
-  builder.mesh.buffer.setIndex(baseIndex);
+  const baseIndex = targetBuilder.mesh.vertexCount;
+  targetBuilder.mesh.buffer.setIndex(baseIndex);
   addVertex(
-    builder.mesh.buffer.curentIndex,
-    builder.mesh.buffer.currentArray,
+    targetBuilder.mesh.buffer.curentIndex,
+    targetBuilder.mesh.buffer.currentArray,
     origin,
     topRightPos,
     topRightNor,
     quad.uvs.vertices[QuadVerticies.TopRight],
     topRightVoxelData,
+    topRightMetadata,
     texture,
     overlayTextures
   );
 
-  builder.mesh.buffer.setIndex(baseIndex + 1);
+  targetBuilder.mesh.buffer.setIndex(baseIndex + 1);
   addVertex(
-    builder.mesh.buffer.curentIndex,
-    builder.mesh.buffer.currentArray,
+    targetBuilder.mesh.buffer.curentIndex,
+    targetBuilder.mesh.buffer.currentArray,
     origin,
     topLeftPos,
     topLeftNor,
     quad.uvs.vertices[QuadVerticies.TopLeft],
     topLeftVoxelData,
+    topLeftMetadata,
     texture,
     overlayTextures
   );
-  builder.mesh.buffer.setIndex(baseIndex + 2);
+  targetBuilder.mesh.buffer.setIndex(baseIndex + 2);
   addVertex(
-    builder.mesh.buffer.curentIndex,
-    builder.mesh.buffer.currentArray,
+    targetBuilder.mesh.buffer.curentIndex,
+    targetBuilder.mesh.buffer.currentArray,
     origin,
     bottomLeftPos,
     bottomLeftNor,
     quad.uvs.vertices[QuadVerticies.BottomLeft],
     bottomLeftVoxelData,
+    bottomLeftMetadata,
     texture,
     overlayTextures
   );
-  builder.mesh.buffer.setIndex(baseIndex + 3);
+  targetBuilder.mesh.buffer.setIndex(baseIndex + 3);
   addVertex(
-    builder.mesh.buffer.curentIndex,
-    builder.mesh.buffer.currentArray,
+    targetBuilder.mesh.buffer.curentIndex,
+    targetBuilder.mesh.buffer.currentArray,
     origin,
     bottomRightPos,
     bottomRightNor,
     quad.uvs.vertices[QuadVerticies.BottomRight],
     bottomRightVoxelData,
+    bottomRightMetadata,
     texture,
     overlayTextures
   );
+
+  indIndex = targetBuilder.mesh.indicieCount;
 
   if (!quad.doubleSided) {
     let index = baseIndex;
@@ -277,7 +349,7 @@ export function addVoxelQuad(builder: VoxelModelBuilder, quad: Quad) {
     indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] =
       index + 3;
     indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
-    builder.mesh.addVerticies(4, 6);
+    targetBuilder.mesh.addVerticies(4, 6);
   } else {
     let index = baseIndex;
     indices.setIndex(indIndex).currentArray[indices.curentIndex] = index;
@@ -301,7 +373,7 @@ export function addVoxelQuad(builder: VoxelModelBuilder, quad: Quad) {
     indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] =
       index + 1;
     indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
-    builder.mesh.addVerticies(4, 12);
+    targetBuilder.mesh.addVerticies(4, 12);
   }
 
   builder.vars.reset();
@@ -315,6 +387,7 @@ function addVertex(
   normal: Vector3Like,
   uvs: Vector2Like,
   voxelData: Vector4Like,
+  metadata: Vector4Like,
   texture: number,
   overlayTextures: Vector4Like
 ) {
@@ -344,4 +417,9 @@ function addVertex(
   array[VoxelMeshVertexConstants.VoxelDataOFfset + index + 1] = voxelData.y;
   array[VoxelMeshVertexConstants.VoxelDataOFfset + index + 2] = voxelData.z;
   array[VoxelMeshVertexConstants.VoxelDataOFfset + index + 3] = voxelData.w;
+
+  array[VoxelMeshVertexConstants.MetadataOffset + index] = metadata.x;
+  array[VoxelMeshVertexConstants.MetadataOffset + index + 1] = metadata.y;
+  array[VoxelMeshVertexConstants.MetadataOffset + index + 2] = metadata.z;
+  array[VoxelMeshVertexConstants.MetadataOffset + index + 3] = metadata.w;
 }

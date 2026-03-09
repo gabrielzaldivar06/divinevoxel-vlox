@@ -33,6 +33,7 @@ export class VoxelModelBuilder {
   space: VoxelGeometryBuilderCacheSpace;
   voxel: VoxelCursorInterface;
   nVoxel: DataCursorInterface;
+  transitionBuilder: VoxelModelBuilder | null = null;
   /**The current world position */
   position = Vector3Like.Create();
   /**The current local origin  */
@@ -52,7 +53,12 @@ export class VoxelModelBuilder {
   lightData: Record<VoxelFaces, Record<QuadVerticies, number>>;
   effects: Record<string, number[]>;
 
-  constructor(public id: string, public materialIndex: number) {
+  constructor(
+    public id: string,
+    public materialIndex: number,
+    public baseMaterialId: string = id,
+    public isTransitionGeometry = false
+  ) {
     //  this.faceDataOverride.currentVoxel = this.voxel;
     //  this.faceDataOverride.neighborVoxel = this.nVoxel;
 

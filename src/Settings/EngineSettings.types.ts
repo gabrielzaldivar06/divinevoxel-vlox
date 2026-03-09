@@ -53,10 +53,33 @@ export class MemoryAndCPUSettings {
   useSharedMemory = true;
 }
 
+export interface TerrainSettingsData {}
+export class TerrainSettingsData {
+  visualV2 = false;
+  macroVariation = false;
+  materialTriplanar = false;
+  materialWetness = false;
+  surfaceMetadata = false;
+  surfaceOverlays = false;
+  transitionMeshes = false;
+  transitionMeshMinDistance = 12;
+  transitionMeshMaxDistance = 96;
+  nearCameraHighDetail = false;
+  microVariation = false;
+  benchmarkPreset:
+    | "off"
+    | "baseline"
+    | "material-preview"
+    | "phase-3-preview"
+    | "phase-4-geometry" = "off";
+  benchmarkLabel = "default";
+}
+
 export class EngineSettingsData {
   memoryAndCPU = new MemoryAndCPUSettings();
   mesher = new MesherSettingsData();
   rendererSettings = new RenderSettingsData();
+  terrain = new TerrainSettingsData();
   updating = new UpdatingSettings();
   world = new WorldSettings();
   propagation = new PropagationSettings();

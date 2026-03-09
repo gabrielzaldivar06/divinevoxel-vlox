@@ -1,5 +1,6 @@
-import { Vec4Array } from "@amodx/math";
-import { VoxelFaceDirections, VoxelFaces } from "../../../../../Math";
+import { Vec3Array, Vec4Array } from "@amodx/math";
+import { VoxelFaces } from "../../../../../Math";
+import { EngineSettings } from "../../../../../Settings/EngineSettings";
 import { Quad } from "../../../../Geometry/Primitives/Quad";
 import { addVoxelQuad } from "../../../Geometry/VoxelGeometryBuilder";
 import { GeoemtryNode } from "../GeometryNode";
@@ -14,6 +15,129 @@ import { ShadeRulledFace } from "../../Common/Faces/ShadeRulledFace";
 import { ShadeRulelessFace } from "../../Common/Faces/ShadeRulelessFace";
 
 const ArgIndexes = QuadVoxelGometryInputs.ArgIndexes;
+
+const transitionFaces = [
+  {
+    face: VoxelFaces.North,
+    direction: "north" as const,
+    offset: [0, 0, 1] as Vec3Array,
+    edge: [0, 1] as const,
+  },
+  {
+    face: VoxelFaces.South,
+    direction: "south" as const,
+    offset: [0, 0, -1] as Vec3Array,
+    edge: [3, 2] as const,
+  },
+  {
+    face: VoxelFaces.East,
+    direction: "east" as const,
+    offset: [1, 0, 0] as Vec3Array,
+    edge: [0, 3] as const,
+  },
+  {
+    face: VoxelFaces.West,
+    direction: "west" as const,
+    offset: [-1, 0, 0] as Vec3Array,
+    edge: [1, 2] as const,
+  },
+];
+
+const transitionCorners = [
+  {
+    diagonalOffset: [1, 0, 1] as Vec3Array,
+    faceA: VoxelFaces.North,
+    faceB: VoxelFaces.East,
+    neighbors: [1, 3] as const,
+    vertex: 0 as const,
+  },
+  {
+    diagonalOffset: [-1, 0, 1] as Vec3Array,
+    faceA: VoxelFaces.North,
+    faceB: VoxelFaces.West,
+    neighbors: [0, 2] as const,
+    vertex: 1 as const,
+  },
+  {
+    diagonalOffset: [-1, 0, -1] as Vec3Array,
+    faceA: VoxelFaces.South,
+    faceB: VoxelFaces.West,
+    neighbors: [3, 1] as const,
+    vertex: 2 as const,
+  },
+  {
+    diagonalOffset: [1, 0, -1] as Vec3Array,
+    faceA: VoxelFaces.South,
+    faceB: VoxelFaces.East,
+    neighbors: [2, 0] as const,
+    vertex: 3 as const,
+  },
+];
+
+const organicTransitionTokens = [
+  "grass",
+  "dirt",
+  "soil",
+  "sand",
+  "mud",
+  "clay",
+  "rock",
+  "stone",
+  "gravel",
+  "moss",
+  "earth",
+];
+
+function copyPoint(point: Vec3Array): Vec3Array {
+  return [point[0], point[1], point[2]];
+}
+
+function lerpPoint(a: Vec3Array, b: Vec3Array, alpha: number): Vec3Array {
+  return [
+    a[0] + (b[0] - a[0]) * alpha,
+    a[1] + (b[1] - a[1]) * alpha,
+    a[2] + (b[2] - a[2]) * alpha,
+  ];
+}
+
+function getQuadCenter(points: [Vec3Array, Vec3Array, Vec3Array, Vec3Array]) {
+  return [
+    (points[0][0] + points[1][0] + points[2][0] + points[3][0]) / 4,
+    (points[0][1] + points[1][1] + points[2][1] + points[3][1]) / 4,
+    (points[0][2] + points[1][2] + points[2][2] + points[3][2]) / 4,
+  ] as Vec3Array;
+}
+
+function createInsetTopPoints(
+  points: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+  inset: number,
+  height: number
+) {
+  const center = getQuadCenter(points);
+  return points.map((point) => {
+    const nextPoint = copyPoint(point);
+    nextPoint[0] += (center[0] - nextPoint[0]) * inset;
+    nextPoint[2] += (center[2] - nextPoint[2]) * inset;
+    nextPoint[1] += height;
+    return nextPoint;
+  }) as [Vec3Array, Vec3Array, Vec3Array, Vec3Array];
+}
+
+function createInsetPoints(
+  points: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+  inset: number,
+  height: number
+) {
+  return createInsetTopPoints(points, inset, height);
+}
+
+function isOrganicTransitionCandidate(stringId: string) {
+  return organicTransitionTokens.some((token) => stringId.includes(token));
+}
+
+function isOpenTransitionNeighbor(foundHash: number) {
+  return foundHash < 2;
+}
 
 export class QuadVoxelGometryNode extends GeoemtryNode<
   CompiledQuadVoxelGeometryNode,
@@ -33,6 +157,200 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
       this.trueFaceIndex = this.data.trueFaceIndex;
   }
 
+  private shadeFace(face: VoxelFaces) {
+    const builder = this.builder;
+    builder.calculateFaceData(face);
+    this.trueFaceIndex !== undefined && face === this.closestFace
+      ? ShadeRulledFace(
+          builder,
+          this.trueFaceIndex,
+          builder.lightData[face],
+          this.vertexWeights,
+          4,
+        )
+      : ShadeRulelessFace(
+          builder,
+          builder.lightData[face],
+          this.vertexWeights,
+          4,
+        );
+  }
+
+  private addTransitionQuad(
+    quad: Quad,
+    face: VoxelFaces,
+    texture: QuadVoxelGometryArgs[typeof ArgIndexes.Texture],
+    useFullUvs = false,
+    doubleSided = false,
+  ) {
+    const builder = this.builder;
+    const targetBuilder = builder.transitionBuilder || builder;
+    quad.doubleSided = doubleSided;
+    this.shadeFace(face);
+    if (useFullUvs) {
+      quad.setUVs(Quad.FullUVs as any);
+    }
+    GetTexture(builder, texture, face, quad);
+    addVoxelQuad(builder, quad, targetBuilder);
+    targetBuilder.updateBounds(quad.bounds);
+  }
+
+  private addConvexCorner(
+    corner: (typeof transitionCorners)[number],
+    points: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+    topInsetPoints: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+    texture: QuadVoxelGometryArgs[typeof ArgIndexes.Texture],
+  ) {
+    const outerCorner = points[corner.vertex];
+    const topInnerCorner = topInsetPoints[corner.vertex];
+    const outerA = lerpPoint(outerCorner, points[corner.neighbors[0]], 0.4);
+    const outerB = lerpPoint(outerCorner, points[corner.neighbors[1]], 0.4);
+    const topInnerA = lerpPoint(
+      topInnerCorner,
+      topInsetPoints[corner.neighbors[0]],
+      0.4,
+    );
+    const topInnerB = lerpPoint(
+      topInnerCorner,
+      topInsetPoints[corner.neighbors[1]],
+      0.4,
+    );
+    const quad = Quad.Create(
+      Quad.OrderQuadVertices(
+        [outerA, outerB, topInnerB, topInnerA],
+        "up",
+      ),
+      Quad.FullUVs as any,
+    );
+
+    this.addTransitionQuad(quad, VoxelFaces.Up, texture, true, false);
+  }
+
+  private addConcaveCorner(
+    corner: (typeof transitionCorners)[number],
+    topInsetPoints: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+    capHeight: number,
+    texture: QuadVoxelGometryArgs[typeof ArgIndexes.Texture],
+  ) {
+    const innerCorner = topInsetPoints[corner.vertex];
+    const rimA = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[0]], 0.4);
+    const rimB = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[1]], 0.4);
+    const pocket = getQuadCenter([
+      innerCorner,
+      rimA,
+      rimB,
+      lerpPoint(rimA, rimB, 0.5),
+    ]);
+    pocket[1] -= Math.max(0.05, capHeight * 0.65);
+    const quad = Quad.Create(
+      Quad.OrderQuadVertices([rimA, innerCorner, rimB, pocket], "up"),
+      Quad.FullUVs as any,
+    );
+
+    this.addTransitionQuad(quad, VoxelFaces.Up, texture, true, false);
+  }
+
+  private addOrganicTransitions(args: QuadVoxelGometryArgs) {
+    const terrainSettings = EngineSettings.settings.terrain;
+    if (!terrainSettings.transitionMeshes) return;
+    if (this.closestFace !== VoxelFaces.Up) return;
+
+    const stringId = this.builder.voxel.getStringId();
+    if (!isOrganicTransitionCandidate(stringId)) return;
+
+    const points = this.quad.positions.toVec3Array();
+    const position = this.builder.position;
+    const space = this.builder.space;
+    const nVoxel = this.builder.nVoxel;
+
+    const exposedFaces = transitionFaces.filter(({ offset }) => {
+      const hashed = space.getHash(
+        nVoxel,
+        position.x + offset[0],
+        position.y + offset[1],
+        position.z + offset[2],
+      );
+      return isOpenTransitionNeighbor(space.foundHash[hashed]);
+    });
+
+    if (!exposedFaces.length) return;
+
+    const exposedFaceSet = new Set(exposedFaces.map((face) => face.face));
+
+    const capHeight = terrainSettings.nearCameraHighDetail
+      ? 0.11
+      : exposedFaces.length > 1
+        ? 0.08
+        : 0.06;
+    const capInset = terrainSettings.nearCameraHighDetail ? 0.3 : 0.24;
+    const topInsetPoints = createInsetPoints(points, capInset, capHeight);
+    const capQuad = Quad.Create(
+      Quad.OrderQuadVertices(topInsetPoints, "up"),
+      this.quad.uvs.toVec2Array(),
+    );
+    this.addTransitionQuad(
+      capQuad,
+      VoxelFaces.Up,
+      args[ArgIndexes.Texture],
+      false,
+      false,
+    );
+
+    for (const transitionFace of exposedFaces) {
+      const outerA = copyPoint(points[transitionFace.edge[0]]);
+      const outerB = copyPoint(points[transitionFace.edge[1]]);
+      const topA = copyPoint(topInsetPoints[transitionFace.edge[0]]);
+      const topB = copyPoint(topInsetPoints[transitionFace.edge[1]]);
+      const shoulderQuad = Quad.Create(
+        Quad.OrderQuadVertices(
+          [outerA, outerB, topB, topA],
+          transitionFace.direction,
+        ),
+        Quad.FullUVs as any,
+      );
+      this.addTransitionQuad(
+        shoulderQuad,
+        transitionFace.face,
+        args[ArgIndexes.Texture],
+        true,
+        false,
+      );
+    }
+
+    for (const corner of transitionCorners) {
+      if (!exposedFaceSet.has(corner.faceA) || !exposedFaceSet.has(corner.faceB)) {
+        continue;
+      }
+
+      const hashed = space.getHash(
+        nVoxel,
+        position.x + corner.diagonalOffset[0],
+        position.y + corner.diagonalOffset[1],
+        position.z + corner.diagonalOffset[2],
+      );
+      const diagonalFound = space.foundHash[hashed];
+      const diagonalExposed = isOpenTransitionNeighbor(diagonalFound);
+
+      if (diagonalFound === 3) {
+        continue;
+      }
+
+      diagonalExposed
+        ? this.addConvexCorner(
+            corner,
+            points,
+            topInsetPoints,
+            args[ArgIndexes.Texture],
+          )
+        : this.addConcaveCorner(
+            corner,
+            topInsetPoints,
+            capHeight,
+            args[ArgIndexes.Texture],
+          );
+    }
+  }
+
   add(args: QuadVoxelGometryArgs) {
     if (!args[ArgIndexes.Enabled]) return false;
 
@@ -44,22 +362,7 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     )
       return false;
 
-    builder.calculateFaceData(this.closestFace);
-
-    this.trueFaceIndex !== undefined
-      ? ShadeRulledFace(
-          builder,
-          this.trueFaceIndex,
-          builder.lightData[this.closestFace],
-          this.vertexWeights,
-          4,
-        )
-      : ShadeRulelessFace(
-          builder,
-          builder.lightData[this.closestFace],
-          this.vertexWeights,
-          4,
-        );
+    this.shadeFace(this.closestFace);
     const quad = this.quad;
 
     quad.doubleSided = args[ArgIndexes.DoubleSided];
@@ -83,6 +386,8 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     builder.updateBounds(quad.bounds);
     builder.vars.light.setAll(0);
     builder.vars.ao.setAll(0);
+
+    this.addOrganicTransitions(args);
 
     return true;
   }

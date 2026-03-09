@@ -27,6 +27,7 @@ function meshVoxel(
 
   const builder =
     RenderedMaterials.meshers[VoxelLUT.materialMap[voxel.getVoxelId()]];
+  const transitionBuilder = builder.transitionBuilder;
   builder.origin.x = x;
   builder.origin.y = y;
   builder.origin.z = z;
@@ -36,9 +37,22 @@ function meshVoxel(
   builder.voxel = voxel;
   builder.nVoxel = templateCursor;
 
+  if (transitionBuilder) {
+    transitionBuilder.origin.x = x;
+    transitionBuilder.origin.y = y;
+    transitionBuilder.origin.z = z;
+    transitionBuilder.position.x = x;
+    transitionBuilder.position.y = y;
+    transitionBuilder.position.z = z;
+    transitionBuilder.voxel = voxel;
+    transitionBuilder.nVoxel = templateCursor;
+    transitionBuilder.startConstruction();
+  }
+
   builder.startConstruction();
   added = BuildVoxel(builder);
   builder.endConstruction();
+  transitionBuilder?.endConstruction();
   return added;
 }
 
