@@ -13,6 +13,7 @@ import { GetTexture } from "../../Common/GetTexture";
 import { CullRulledFace } from "../../Common/Faces/CullRulledFace";
 import { ShadeRulledFace } from "../../Common/Faces/ShadeRulledFace";
 import { ShadeRulelessFace } from "../../Common/Faces/ShadeRulelessFace";
+import { VoxelLUT } from "../../../../../Voxels/Data/VoxelLUT";
 
 const ArgIndexes = QuadVoxelGometryInputs.ArgIndexes;
 
@@ -22,24 +23,28 @@ const transitionFaces = [
     direction: "north" as const,
     offset: [0, 0, 1] as Vec3Array,
     edge: [0, 1] as const,
+    diagonalOffsets: [[1, 0, 1], [-1, 0, 1]] as Vec3Array[],
   },
   {
     face: VoxelFaces.South,
     direction: "south" as const,
     offset: [0, 0, -1] as Vec3Array,
     edge: [3, 2] as const,
+    diagonalOffsets: [[1, 0, -1], [-1, 0, -1]] as Vec3Array[],
   },
   {
     face: VoxelFaces.East,
     direction: "east" as const,
     offset: [1, 0, 0] as Vec3Array,
     edge: [0, 3] as const,
+    diagonalOffsets: [[1, 0, 1], [1, 0, -1]] as Vec3Array[],
   },
   {
     face: VoxelFaces.West,
     direction: "west" as const,
     offset: [-1, 0, 0] as Vec3Array,
     edge: [1, 2] as const,
+    diagonalOffsets: [[-1, 0, 1], [-1, 0, -1]] as Vec3Array[],
   },
 ];
 
@@ -137,6 +142,45 @@ function isOrganicTransitionCandidate(stringId: string) {
 
 function isOpenTransitionNeighbor(foundHash: number) {
   return foundHash < 2;
+}
+
+function isRenderableTransitionNeighbor(foundHash: number) {
+  return foundHash >= 2;
+}
+
+function getNeighborHash(
+  space: QuadVoxelGometryNode["builder"]["space"],
+  nVoxel: QuadVoxelGometryNode["builder"]["nVoxel"],
+  position: QuadVoxelGometryNode["builder"]["position"],
+  offset: Vec3Array,
+) {
+  return space.getHash(
+    nVoxel,
+    position.x + offset[0],
+    position.y + offset[1],
+    position.z + offset[2],
+  );
+}
+
+function getNeighborStringId(
+  space: QuadVoxelGometryNode["builder"]["space"],
+  hashed: number,
+) {
+  const trueVoxelId = space.trueVoxelCache[hashed];
+  if (!trueVoxelId) return "dve_air";
+  return VoxelLUT.voxelIds.getStringId(trueVoxelId);
+}
+
+function isCompatibleTransitionNeighbor(
+  space: QuadVoxelGometryNode["builder"]["space"],
+  hashed: number,
+  currentStringId: string,
+) {
+  const neighborStringId = getNeighborStringId(space, hashed);
+  return (
+    isOrganicTransitionCandidate(neighborStringId) &&
+    neighborStringId === currentStringId
+  );
 }
 
 export class QuadVoxelGometryNode extends GeoemtryNode<
@@ -241,7 +285,7 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
       rimB,
       lerpPoint(rimA, rimB, 0.5),
     ]);
-    pocket[1] -= Math.max(0.05, capHeight * 0.65);
+    pocket[1] -= Math.max(0.06, capHeight * 0.82);
     const quad = Quad.Create(
       Quad.OrderQuadVertices([rimA, innerCorner, rimB, pocket], "up"),
       Quad.FullUVs as any,
@@ -264,12 +308,7 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     const nVoxel = this.builder.nVoxel;
 
     const exposedFaces = transitionFaces.filter(({ offset }) => {
-      const hashed = space.getHash(
-        nVoxel,
-        position.x + offset[0],
-        position.y + offset[1],
-        position.z + offset[2],
-      );
+      const hashed = getNeighborHash(space, nVoxel, position, offset);
       return isOpenTransitionNeighbor(space.foundHash[hashed]);
     });
 
@@ -282,7 +321,7 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
       : exposedFaces.length > 1
         ? 0.08
         : 0.06;
-    const capInset = terrainSettings.nearCameraHighDetail ? 0.3 : 0.24;
+    const capInset = terrainSettings.nearCameraHighDetail ? 0.34 : 0.28;
     const topInsetPoints = createInsetPoints(points, capInset, capHeight);
     const capQuad = Quad.Create(
       Quad.OrderQuadVertices(topInsetPoints, "up"),
@@ -297,6 +336,23 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     );
 
     for (const transitionFace of exposedFaces) {
+      const blockedDiagonals = transitionFace.diagonalOffsets.reduce(
+        (total, diagonalOffset) => {
+          const hashed = getNeighborHash(space, nVoxel, position, diagonalOffset);
+          const found = space.foundHash[hashed];
+          if (!isRenderableTransitionNeighbor(found)) {
+            return total;
+          }
+          return isCompatibleTransitionNeighbor(space, hashed, stringId)
+            ? total
+            : total + 1;
+        },
+        0,
+      );
+      if (blockedDiagonals >= transitionFace.diagonalOffsets.length) {
+        continue;
+      }
+
       const outerA = copyPoint(points[transitionFace.edge[0]]);
       const outerB = copyPoint(points[transitionFace.edge[1]]);
       const topA = copyPoint(topInsetPoints[transitionFace.edge[0]]);
@@ -322,14 +378,16 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
         continue;
       }
 
-      const hashed = space.getHash(
-        nVoxel,
-        position.x + corner.diagonalOffset[0],
-        position.y + corner.diagonalOffset[1],
-        position.z + corner.diagonalOffset[2],
-      );
+      const hashed = getNeighborHash(space, nVoxel, position, corner.diagonalOffset);
       const diagonalFound = space.foundHash[hashed];
       const diagonalExposed = isOpenTransitionNeighbor(diagonalFound);
+
+      if (
+        isRenderableTransitionNeighbor(diagonalFound) &&
+        !isCompatibleTransitionNeighbor(space, hashed, stringId)
+      ) {
+        continue;
+      }
 
       if (diagonalFound === 3) {
         continue;
