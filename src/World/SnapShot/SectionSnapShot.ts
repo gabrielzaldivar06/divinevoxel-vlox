@@ -37,6 +37,21 @@ export class SectionSnapShot {
     this._sectionSizeZ = WorldSpaces.section.bounds.z;
   }
 
+  reset() {
+    const totalSections = 27;
+    this.sections.length = 0;
+    this._buffers.length = 0;
+    this._used.length = 0;
+    for (let i = 0; i < totalSections; i++) {
+      const buffer = new ArrayBuffer(Section.GetBufferSize());
+      this.sections.push(new Uint8Array(buffer));
+      this._buffers.push(buffer);
+      this._used[i] = false;
+    }
+    this._isTransfered = false;
+    this._updateSizes();
+  }
+
   setLocation(dimension: number, x: number, y: number, z: number) {
     this.location[0] = dimension;
     this.location[1] = x;

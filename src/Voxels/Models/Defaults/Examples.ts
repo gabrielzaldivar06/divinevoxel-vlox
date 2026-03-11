@@ -2256,3 +2256,60 @@ export const diamondModel: VoxelModelData = {
     ],
   },
 };
+
+export type BeachShadeVoxelModelArgs = {
+  poleTexture: number;
+  canopyTexture: number;
+};
+
+export const beachShadeGeometry: VoxelGeometryData = {
+  id: "dve_beach_shade",
+  doNotBuildRules: true,
+  arguments: {
+    poleTexture: {
+      type: "texture",
+    },
+    canopyTexture: {
+      type: "texture",
+    },
+  },
+  nodes: [
+    {
+      type: "custom",
+      id: "beach_shade",
+      inputs: {
+        poleTexture: "@poleTexture",
+        canopyTexture: "@canopyTexture",
+      },
+    },
+  ],
+};
+
+export const beachShadeModel: VoxelModelData = {
+  id: "dve_beach_shade",
+  relationsSchema: [],
+  stateSchema: [],
+  arguments: {
+    poleTexture: {
+      type: "texture",
+    },
+    canopyTexture: {
+      type: "texture",
+    },
+  },
+  conditonalNodes: {},
+  properties: {
+    dve_placing_strategy: "*",
+  },
+  stateNodes: {
+    "*": [
+      {
+        geometryId: "dve_beach_shade",
+        inputs: {
+          poleTexture: "@poleTexture",
+          canopyTexture: "@canopyTexture",
+        },
+      },
+    ],
+  },
+};

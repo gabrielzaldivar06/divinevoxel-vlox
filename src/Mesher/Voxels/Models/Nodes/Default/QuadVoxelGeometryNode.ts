@@ -247,17 +247,17 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
   ) {
     const outerCorner = points[corner.vertex];
     const topInnerCorner = topInsetPoints[corner.vertex];
-    const outerA = lerpPoint(outerCorner, points[corner.neighbors[0]], 0.4);
-    const outerB = lerpPoint(outerCorner, points[corner.neighbors[1]], 0.4);
+    const outerA = lerpPoint(outerCorner, points[corner.neighbors[0]], 0.55);
+    const outerB = lerpPoint(outerCorner, points[corner.neighbors[1]], 0.55);
     const topInnerA = lerpPoint(
       topInnerCorner,
       topInsetPoints[corner.neighbors[0]],
-      0.4,
+      0.55,
     );
     const topInnerB = lerpPoint(
       topInnerCorner,
       topInsetPoints[corner.neighbors[1]],
-      0.4,
+      0.55,
     );
     const quad = Quad.Create(
       Quad.OrderQuadVertices(
@@ -277,15 +277,15 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     texture: QuadVoxelGometryArgs[typeof ArgIndexes.Texture],
   ) {
     const innerCorner = topInsetPoints[corner.vertex];
-    const rimA = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[0]], 0.4);
-    const rimB = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[1]], 0.4);
+    const rimA = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[0]], 0.55);
+    const rimB = lerpPoint(innerCorner, topInsetPoints[corner.neighbors[1]], 0.55);
     const pocket = getQuadCenter([
       innerCorner,
       rimA,
       rimB,
       lerpPoint(rimA, rimB, 0.5),
     ]);
-    pocket[1] -= Math.max(0.06, capHeight * 0.82);
+    pocket[1] -= Math.max(0.1, capHeight * 0.88);
     const quad = Quad.Create(
       Quad.OrderQuadVertices([rimA, innerCorner, rimB, pocket], "up"),
       Quad.FullUVs as any,
@@ -319,9 +319,9 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     const capHeight = terrainSettings.nearCameraHighDetail
       ? 0.11
       : exposedFaces.length > 1
-        ? 0.08
-        : 0.06;
-    const capInset = terrainSettings.nearCameraHighDetail ? 0.34 : 0.28;
+        ? 0.1
+        : 0.08;
+    const capInset = terrainSettings.nearCameraHighDetail ? 0.38 : 0.32;
     const topInsetPoints = createInsetPoints(points, capInset, capHeight);
     const capQuad = Quad.Create(
       Quad.OrderQuadVertices(topInsetPoints, "up"),

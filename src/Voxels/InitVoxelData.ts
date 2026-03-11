@@ -3,6 +3,8 @@ import {
   candlesGeometry2,
   candlesGeometry3,
   candlesGeometry4,
+  beachShadeGeometry,
+  beachShadeModel,
   candlesModel,
   carpetGeometry,
   carpetModel,
@@ -107,7 +109,8 @@ const geometry = [
   ...leverGeometry,
 
   ...farmGeometry,
-  diamondGeometry
+  diamondGeometry,
+  beachShadeGeometry
 ];
 
 const models = [
@@ -134,7 +137,8 @@ const models = [
   liquidModel,
 
   ...farmModels,
-  diamondModel
+  diamondModel,
+  beachShadeModel
 ];
 
 export function InitVoxelData(data: InitVoxelDataProps): CompiledvVxelTags {

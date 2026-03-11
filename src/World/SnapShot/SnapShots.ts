@@ -30,6 +30,9 @@ export class SnapShots {
     let snapShot = this._readyCache.length
       ? this._readyCache.pop()!
       : new SectionSnapShot();
+    if (snapShot.isTransfered()) {
+      snapShot.reset();
+    }
     snapShot.setLocation(dimension,x,y,z);
     snapShot.storeSnapShot();
     return snapShot;

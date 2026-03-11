@@ -12,7 +12,7 @@ const dataTool = brush.voxelCursor;
 
 export class WorldGenRegister {
   static _worldThread: Thread;
-  static MAX_ATTEMPTS = 100;
+  static MAX_ATTEMPTS = 1000;
   static _requests = new Map<
     string,
     {

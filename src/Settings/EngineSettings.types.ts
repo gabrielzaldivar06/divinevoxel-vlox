@@ -16,6 +16,7 @@ export class RenderSettingsData {
   /* Single buffer mode will store vertex and indicies in single big buffer. While multi will store a buffer for each section mesh.*/
   bufferMode: "single" | "multi" = "multi";
   textureSize: Vec2Array = [16, 16];
+  sharpTextureSampling = false;
 }
 export interface UpdatingSettings {}
 export class UpdatingSettings {
@@ -64,15 +65,27 @@ export class TerrainSettingsData {
   transitionMeshes = false;
   transitionMeshMinDistance = 12;
   transitionMeshMaxDistance = 96;
+  viewConeCulling = false;
+  viewConeThreshold = 0.18;
+  horizonCulling = false;
+  horizonExtraHeight = 32;
   nearCameraHighDetail = false;
   microVariation = false;
   benchmarkPreset:
     | "off"
     | "baseline"
     | "material-preview"
+    | "material-import"
+    | "optimum-inspired"
+    | "universalis-inspired"
     | "phase-3-preview"
+    | "pbr-premium"
+    | "pbr-surface-lod"
     | "phase-4-geometry" = "off";
   benchmarkLabel = "default";
+  defaultTextureUpscale = 1;
+  defaultSharpTextureSampling = false;
+  defaultCameraFov = 70;
 }
 
 export class EngineSettingsData {
