@@ -8,6 +8,7 @@ export class WorldVoxelCursor extends VoxelCursorInterface {
   light: Uint16Array;
   level: Uint8Array;
   secondary: Uint16Array;
+  radiation: Uint8Array;
 
   constructor(protected dataCursor: WorldSectionCursorInterface) {
     super();
@@ -20,6 +21,7 @@ export class WorldVoxelCursor extends VoxelCursorInterface {
     this.light = this._section.light;
     this.level = this._section.level;
     this.secondary = this._section.secondary;
+    this.radiation = this._section.radiation;
 
     this._index = this.dataCursor._voxelIndex;
     this.process();

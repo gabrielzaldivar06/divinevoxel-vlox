@@ -21,6 +21,8 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
       //secondary
       voxelSize * 2 +
       //level
+      voxelSize +
+      //radiation
       voxelSize;
     const sectionBuffer = EngineSettings.settings.memoryAndCPU.useSharedMemory
       ? new SharedArrayBuffer(bufferSize)
@@ -38,6 +40,9 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
 
     const level = new Uint8Array(sectionBuffer, bufferStart, voxelSize);
     bufferStart += voxelSize;
+
+    const radiation = new Uint8Array(sectionBuffer, bufferStart, voxelSize);
+    bufferStart += voxelSize;
     return {
       type: "full",
       bounds: Vector3Like.Create(...bounds),
@@ -45,6 +50,7 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
       light,
       level,
       secondary,
+      radiation,
     };
   }
 
@@ -54,6 +60,7 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
   level: Uint8Array;
   light: Uint16Array;
   secondary: Uint16Array;
+  radiation: Uint8Array;
 
   mask?: Uint8Array;
 
@@ -117,6 +124,7 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
       light: this.light.slice(),
       level: this.level.slice(),
       secondary: this.secondary.slice(),
+      radiation: this.radiation.slice(),
       ...(this.mask ? { mask: this.mask.slice() } : {}),
     });
     return newTemplate;
@@ -130,6 +138,7 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
       light: this.light,
       level: this.level,
       secondary: this.secondary,
+      radiation: this.radiation,
       ...(this.mask ? { mask: this.mask } : {}),
     };
   }
@@ -142,6 +151,7 @@ export class FullVoxelTemplate implements IVoxelTemplate<"full"> {
     this.level = data.level;
     this.light = data.light;
     this.secondary = data.secondary;
+    this.radiation = data.radiation;
     if (data.mask) this.mask = data.mask;
   }
 }

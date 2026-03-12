@@ -2,7 +2,7 @@ import { VoxelTagsRegister } from "../Data/VoxelTagsRegister";
 import { VoxelData } from "../Types/Voxel.types";
 import { VoxelMaterialData } from "../Types/VoxelMaterial.types";
 import { VoxelSubstanceData } from "../Types/VoxelSubstances.types";
-import { VoxelSubstanceTags, VoxelTags } from "../Data/VoxelTag.types";
+import { VoxelSubstanceTags, VoxelTagIds, VoxelTags } from "../Data/VoxelTag.types";
 import { CompiledvVxelTags } from "../Types/VoxelModelCompiledData.types";
 import { VoxelLogicData } from "../Logic/VoxelLogic.types";
 import { VoxelPropertiesRegister } from "../Data/VoxelPropertiesRegister";
@@ -68,6 +68,9 @@ export function BuildTagAndPaletteData(
       (tags as any)[tag] = voxel.properties[tag];
     }
     VoxelTagsRegister.VoxelTags[voxelId] = tags;
+    if (tags[VoxelTagIds.isRadiationSource]) {
+      VoxelTagsRegister.RadiationSourceIds.add(voxelId);
+    }
   }
 
   for (const substance of props.substances) {

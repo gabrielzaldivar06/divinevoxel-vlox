@@ -3,6 +3,7 @@ import { TasksIds } from "../TasksIds";
 import { VoxelUpdateTask } from "../VoxelUpdateTask";
 import { RunWorldSun } from "./Illumanation/WorldSun";
 import { WorldRGB } from "./Illumanation/WorldRGB";
+import { WorldRadiation } from "./Radiation/WorldRadiation";
 import { WorldRegister } from "../../World/WorldRegister";
 import { Sector } from "../../World";
 import { getLocationData } from "../../Util/LocationData";
@@ -14,6 +15,7 @@ export default function InitTasks() {
     const location = getLocationData(view);
     task.setOrigin(...location);
     WorldRGB(task);
+    WorldRadiation(task);
     WorldRegister.sectors
       .get(...location)!
       .setBitFlag(Sector.FlagIds.isWorldPropagationDone, true);

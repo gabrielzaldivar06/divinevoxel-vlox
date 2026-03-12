@@ -6,6 +6,7 @@ export class TemplateProxy {
   levels: NumberArray;
   secondary: NumberArray;
   light: NumberArray;
+  radiation: NumberArray;
   constructor(public template: IVoxelTemplate) {
     this.ids = new Proxy([], {
       get: (_, index) => this.template.getId(Number(index)),
@@ -18,6 +19,9 @@ export class TemplateProxy {
     });
     this.secondary = new Proxy([], {
       get: (_, index) => this.template.getSecondary(Number(index)),
+    });
+    this.radiation = new Proxy([], {
+      get: () => 0,
     });
   }
 

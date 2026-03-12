@@ -61,6 +61,7 @@ export class TerrainSettingsData {
   materialTriplanar = false;
   materialWetness = false;
   surfaceMetadata = false;
+  surfaceHeightGradient = false;
   surfaceOverlays = false;
   transitionMeshes = false;
   transitionMeshMinDistance = 12;
@@ -80,6 +81,7 @@ export class TerrainSettingsData {
     | "universalis-inspired"
     | "phase-3-preview"
     | "pbr-premium"
+    | "pbr-premium-v2"
     | "pbr-surface-lod"
     | "phase-4-geometry" = "off";
   benchmarkLabel = "default";

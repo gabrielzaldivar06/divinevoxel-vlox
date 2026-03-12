@@ -49,6 +49,7 @@ export class VoxelCursor extends VoxelCursorInterface {
   light: number[] = [];
   level: number[] = [];
   secondary: number[] = [];
+  radiation: number[] = [];
 
   loadIn() {
     this.process();

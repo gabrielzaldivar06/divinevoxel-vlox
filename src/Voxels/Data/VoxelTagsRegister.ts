@@ -25,6 +25,14 @@ export class VoxelTagsRegister {
     VoxelTagIds.powerValue,
     VoxelTagIds.fullBlock,
     VoxelTagIds.simulationBehavior,
+    VoxelTagIds.ph,
+    VoxelTagIds.friction,
+    VoxelTagIds.adhesion,
+    VoxelTagIds.porosity,
+    VoxelTagIds.shearStrength,
+    VoxelTagIds.albedoValue,
+    VoxelTagIds.isRadiationSource,
+    VoxelTagIds.radiationValue,
   ];
   static IncludedSubstnacesTags: string[] = [
     VoxelSubstanceTagIds.parent,
@@ -39,8 +47,18 @@ export class VoxelTagsRegister {
     [VoxelTagIds.substance]: "dve_solid",
     [VoxelTagIds.colliderID]: "dve_cube",
     [VoxelTagIds.simulationBehavior]: "dve_default",
+    [VoxelTagIds.ph]: 7,
+    [VoxelTagIds.friction]: 0.5,
+    [VoxelTagIds.adhesion]: 0,
+    [VoxelTagIds.porosity]: 0,
+    [VoxelTagIds.shearStrength]: 100,
+    [VoxelTagIds.albedoValue]: 0.3,
+    [VoxelTagIds.isRadiationSource]: false,
+    [VoxelTagIds.radiationValue]: 0,
   };
   static VoxelTags: VoxelTags[] = [];
+  /** Pre-computed set of numeric voxel IDs that are radiation sources. */
+  static RadiationSourceIds: Set<number> = new Set();
 
   static SubstanceTagDefaults: Record<string, any> = {};
   static SubstanceTags: VoxelSubstanceTags[] = [];

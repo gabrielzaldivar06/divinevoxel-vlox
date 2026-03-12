@@ -53,7 +53,9 @@ export class Section {
         //level
         voxelSize +
         //secondary
-        voxelSize * 2
+        voxelSize * 2 +
+        //radiation
+        voxelSize
     );
   }
   static GetArrayStartIndex(index: number) {
@@ -120,6 +122,9 @@ export class Section {
 
     this.level = new Uint8Array(buffer, bufferStart, voxelSize);
     bufferStart += voxelSize;
+
+    this.radiation = new Uint8Array(buffer, bufferStart, voxelSize);
+    bufferStart += voxelSize;
   }
   clear() {
     this.flagArray = null as any;
@@ -131,6 +136,7 @@ export class Section {
     this.light = null as any;
     this.secondary = null as any;
     this.level = null as any;
+    this.radiation = null as any;
   }
 
   getPosition(): Readonly<Vec3Array> {

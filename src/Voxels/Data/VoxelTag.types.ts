@@ -18,6 +18,14 @@ export enum VoxelTagIds {
   powerValue = "dve_power_value",
   fullBlock = "dve_full_block",
   simulationBehavior = "dve_simulation_behavior",
+  ph = "dve_ph",
+  friction = "dve_friction",
+  adhesion = "dve_adhesion",
+  porosity = "dve_porosity",
+  shearStrength = "dve_shear_strength",
+  albedoValue = "dve_albedo_value",
+  isRadiationSource = "dve_is_radiation_source",
+  radiationValue = "dve_radiation_value",
 }
 
 export interface VoxelTags {
@@ -74,6 +82,30 @@ export interface VoxelTags {
 
   /** If the voxel is a power source this is its value */
   [VoxelTagIds.powerValue]: number;
+
+  /** pH value of the voxel material (0-14). Affects biological membrane integrity. */
+  [VoxelTagIds.ph]: number;
+
+  /** Friction coefficient of the voxel surface. Affects movement energy cost. */
+  [VoxelTagIds.friction]: number;
+
+  /** Adhesion coefficient. How much the surface "grabs" entities (e.g. mud viscosity). */
+  [VoxelTagIds.adhesion]: number;
+
+  /** Porosity of the material (0-1). Affects gas diffusion through the voxel. */
+  [VoxelTagIds.porosity]: number;
+
+  /** Shear strength. Load limit before structural collapse. */
+  [VoxelTagIds.shearStrength]: number;
+
+  /** Albedo value (0-1). How much light the surface reflects. */
+  [VoxelTagIds.albedoValue]: number;
+
+  /** Whether this voxel emits radiation. */
+  [VoxelTagIds.isRadiationSource]: boolean;
+
+  /** Radiation intensity emitted by this voxel (0-15). */
+  [VoxelTagIds.radiationValue]: number;
 }
 
 export enum VoxelSubstanceTagIdds {

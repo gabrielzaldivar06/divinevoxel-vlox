@@ -14,6 +14,8 @@ export interface VoxelDataArrays {
   /**The secondary state of the voxel. Can be set to a voxel id to make things like water logged voxels.
    */
   secondary: Uint16Array;
+  /**Radiation level per voxel. Used for radiation propagation (0-255). */
+  radiation: Uint8Array;
 }
 
 export type VoxelNamedStateData = {

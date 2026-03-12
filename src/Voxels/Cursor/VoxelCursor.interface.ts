@@ -29,6 +29,7 @@ export abstract class VoxelCursorInterface {
   abstract light: NumberArray;
   abstract level: NumberArray;
   abstract secondary: NumberArray;
+  abstract radiation: NumberArray;
 
   /**
    *
@@ -312,6 +313,22 @@ export abstract class VoxelCursorInterface {
   isFullBlock(){
     return this.tags["dve_full_block"];
   }
+
+  getRadiation() {
+    return this.radiation[this._index];
+  }
+  setRadiation(value: number) {
+    this.radiation[this._index] = value;
+    return this;
+  }
+  isRadiationSource() {
+    if (this._voxelId <= 0) return false;
+    return this.tags[VoxelTagIds.isRadiationSource];
+  }
+  getRadiationSourceValue() {
+    if (this._voxelId <= 0) return 0;
+    return this.tags[VoxelTagIds.radiationValue] as number;
+  }
   
   isSameVoxel(voxel: VoxelCursorInterface) {
     return this.getVoxelId() == voxel.getVoxelId();
@@ -321,6 +338,7 @@ export abstract class VoxelCursorInterface {
     this.light[this._index] = cursor.light[cursor._index];
     this.level[this._index] = cursor.level[cursor._index];
     this.secondary[this._index] = cursor.secondary[cursor._index];
+    this.radiation[this._index] = cursor.radiation[cursor._index];
     return this;
   }
 

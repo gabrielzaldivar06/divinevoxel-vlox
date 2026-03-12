@@ -7,6 +7,8 @@ import {
   RGBUpdate,
   SunRemove,
   SunUpdate,
+  RadiationUpdate,
+  RadiationRemove,
 } from "../Propagation/index.js";
 
 export const updatePowerTask = (tasks: VoxelUpdateTask) => {
@@ -235,6 +237,28 @@ export const checkLightUpdate = (
   if (needRGBUpdate && !needRGBRemove) {
     tasks.rgb.update.push(x, y, z);
   }
+
+  // Radiation
+  const radValue = voxel.getRadiation();
+  if (radValue > 0 && !voxel.isRadiationSource()) {
+    let foundHigherRad = false;
+    let lowestRadValue = Infinity;
+    for (let i = 0; i < CardinalNeighbors3D.length; i++) {
+      const n = CardinalNeighbors3D[i];
+      const nRVoxel = tasks.nDataCursor.getVoxel(n[0] + x, n[1] + y, n[2] + z);
+      if (!nRVoxel) continue;
+      const nRad = nRVoxel.getRadiation();
+      if (nRad < lowestRadValue) lowestRadValue = nRad;
+      if (nRad > radValue) foundHigherRad = true;
+    }
+    if (!foundHigherRad) {
+      tasks.radiation.remove.push(x, y, z);
+    } else if (lowestRadValue < radValue - 1) {
+      tasks.radiation.update.push(x, y, z);
+    }
+  } else if (voxel.isRadiationSource()) {
+    tasks.radiation.update.push(x, y, z);
+  }
 };
 
 export const updateArea = (
@@ -260,8 +284,10 @@ export const updateArea = (
 
   SunRemove(tasks);
   RGBRemove(tasks);
+  RadiationRemove(tasks);
   SunUpdate(tasks);
   RGBUpdate(tasks);
+  RadiationUpdate(tasks);
 
   tasks.bounds.markDisplayDirty();
 };

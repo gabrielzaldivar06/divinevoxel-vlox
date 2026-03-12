@@ -17,6 +17,9 @@ export class TemplateVoxelCursor extends VoxelCursorInterface {
   get secondary() {
     return this._proxy.secondary;
   }
+  get radiation() {
+    return this._proxy.radiation;
+  }
 
   constructor(public dataCursor: TemplateCursor) {
     super();

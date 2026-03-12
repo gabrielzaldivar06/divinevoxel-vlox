@@ -7,7 +7,7 @@ export enum SectorStateDefaultBitFlags {
   logicDirty,
   stored,
   inProgress,
-
+  isWorldRadiationDone,
 }
 
 export enum SectorStateDefaultTimeStamps {

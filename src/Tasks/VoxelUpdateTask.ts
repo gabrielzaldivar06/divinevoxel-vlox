@@ -164,6 +164,7 @@ export class VoxelUpdateTask {
   rgb = new LightQueue();
   sun = new LightQueue();
   power = new PowerQueue();
+  radiation = new RadiationQueue();
 
   bounds = new UpdatedBounds(this);
   sDataCursor = new WorldCursor();
@@ -182,6 +183,8 @@ export class VoxelUpdateTask {
     this.sun.removeMap.start(x, y, z);
     this.rgb.updateMap.start(x, y, z);
     this.sun.updateMap.start(x, y, z);
+    this.radiation.removeMap.start(x, y, z);
+    this.radiation.updateMap.start(x, y, z);
     this.flow.update.map.start(x, y, z);
     this.flow.remove.map.start(x, y, z);
     this.flow.remove.noRemoveMap.start(x, y, z);
@@ -195,6 +198,7 @@ export class VoxelUpdateTask {
     this.rgb.clear();
     this.sun.clear();
     this.flow.clear();
+    this.radiation.clear();
   }
 }
 
@@ -232,6 +236,20 @@ class LightQueue {
 }
 
 class PowerQueue {
+  update: number[] = [];
+  remove: number[] = [];
+  removeMap = new TaskMap();
+  updateMap = new TaskMap();
+
+  clear() {
+    this.update.length = 0;
+    this.remove.length = 0;
+    this.removeMap.clear();
+    this.updateMap.clear();
+  }
+}
+
+class RadiationQueue {
   update: number[] = [];
   remove: number[] = [];
   removeMap = new TaskMap();
