@@ -25,9 +25,9 @@ export default function () {
   Threads.registerTask<PaintVoxelPathTask>(TasksIds.PaintVoxelPath, (data) =>
     PaintVoxelPath(...data)
   );
-  Threads.registerTask<EraseVoxelTask>(TasksIds.EraseVoxel, (data) =>
-    EraseVoxel(...data)
-  );
+  Threads.registerTask<EraseVoxelTask, number>(TasksIds.EraseVoxel, (data) => {
+    return [EraseVoxel(...data)];
+  });
   Threads.registerTask<EraseVoxelTemplateTask>(
     TasksIds.EraseVoxelTemplate,
     (data) => EraseVoxelTemplate(...data)

@@ -60,6 +60,22 @@ export class SectionSnapShot {
   }
 
   storeSnapShot() {
+    // Guard: reallocate any section buffer whose size doesn't match the current
+    // WorldSpaces configuration. This handles two failure modes:
+    //   1. Snapshot was constructed/cached before WorldSpaces was fully configured
+    //      (buffer too small → set() throws RangeError).
+    //   2. Buffer was neutered after an ArrayBuffer transfer and was never properly
+    //      restored (byteLength === 0 → set() throws TypeError).
+    const expectedSize = Section.GetBufferSize();
+    for (let i = 0; i < this.sections.length; i++) {
+      if (this.sections[i].byteLength !== expectedSize) {
+        const buf = new ArrayBuffer(expectedSize);
+        this._buffers[i] = buf;
+        this.sections[i] = new Uint8Array(buf);
+      }
+    }
+    this._updateSizes();
+
     const sizeX = this._sectionSizeX;
     const sizeY = this._sectionSizeY;
     const sizeZ = this._sectionSizeZ;

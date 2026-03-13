@@ -88,6 +88,19 @@ export class TerrainSettingsData {
   defaultTextureUpscale = 1;
   defaultSharpTextureSampling = false;
   defaultCameraFov = 70;
+  dissolution = false;
+  dissolutionIntensity = 1.0;
+  dissolutionSplats = false;
+  dissolutionTemporal = false;
+  atmosphericSplats = false;
+  lodMorph = false;
+  /**
+   * Maximum number of active scene meshes (draw-call budget).
+   * Each active mesh = 1 draw call per render pass.
+   * Budget prevents mesh-count regression from new features.
+   * Default 800 covers ~50 sections × 16 materials with headroom.
+   */
+  maxSceneMeshes = 800;
 }
 
 export class EngineSettingsData {

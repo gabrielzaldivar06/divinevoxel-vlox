@@ -14,6 +14,13 @@ import { CullRulledFace } from "../../Common/Faces/CullRulledFace";
 import { ShadeRulledFace } from "../../Common/Faces/ShadeRulledFace";
 import { ShadeRulelessFace } from "../../Common/Faces/ShadeRulelessFace";
 import { VoxelLUT } from "../../../../../Voxels/Data/VoxelLUT";
+import {
+  buildSubdividedFace,
+  isSubdivisionCandidate,
+  computeExposedFaces,
+  getSubdivisionLevel,
+  getPullConfig,
+} from "../Custom/Subdivision/SubdivisionBuilder";
 
 const ArgIndexes = QuadVoxelGometryInputs.ArgIndexes;
 
@@ -439,6 +446,34 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
     quad.uvs.vertices[3].y = uvs[3][1];
 
     GetTexture(builder, args[ArgIndexes.Texture], this.closestFace, quad);
+
+    // Dissolution subdivision: replace single quad with subdivided grid + vertex pulling
+    if (EngineSettings.settings.terrain.dissolution) {
+      const stringId = builder.voxel.getStringId();
+      if (isSubdivisionCandidate(stringId)) {
+        const exposedFaces = computeExposedFaces(builder, this.closestFace);
+        let airCount = 0;
+        for (let ef = 0; ef < 6; ef++) if (exposedFaces[ef]) airCount++;
+        const edgeBoundary = airCount / 6;
+        const subdivLevel = getSubdivisionLevel(edgeBoundary);
+        const voxelId = builder.voxel.getVoxelId();
+        const pullConfig = getPullConfig(voxelId, stringId);
+        buildSubdividedFace(
+          builder,
+          quad,
+          this.closestFace,
+          subdivLevel,
+          args[ArgIndexes.Texture],
+          pullConfig,
+          exposedFaces,
+        );
+        builder.vars.light.setAll(0);
+        builder.vars.ao.setAll(0);
+        this.addOrganicTransitions(args);
+        return true;
+      }
+    }
+
     addVoxelQuad(builder, quad);
 
     builder.updateBounds(quad.bounds);

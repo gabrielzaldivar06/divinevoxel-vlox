@@ -3,6 +3,7 @@
     "target": "esNext",
     "module": "esNext",
     "declaration": true,
+    "composite": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,

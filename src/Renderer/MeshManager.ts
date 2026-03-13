@@ -3,16 +3,38 @@ import { MeshRegister } from "./MeshRegister.js";
 import { LocationData } from "../Math/index.js";
 import { DVESectionMeshes } from "./Classes/DVESectionMeshes";
 import { CompactedSectionVoxelMesh } from "../Mesher/Voxels/Geometry/CompactedSectionVoxelMesh";
+import { CompactedMeshData } from "../Mesher/Voxels/Geometry/CompactedSectionVoxelMesh";
 import { SectorMesh } from "./Classes/SectorMesh";
 import { SectionMesh } from "./Classes/SectionMesh";
 const added = new Set<string>();
 const compacted = new CompactedSectionVoxelMesh();
 const location: LocationData = [0, 0, 0, 0];
+
+export type SectionMeshCallback = (
+  sectorKey: string,
+  meshes: { materialId: string; vertices: Float32Array; sectionOrigin: [number, number, number] }[]
+) => void;
+
+export type SectorRemovedCallback = (sectorKey: string) => void;
+
+export type VoxelErasedCallback = (
+  dimensionId: number,
+  x: number,
+  y: number,
+  z: number,
+  voxelId: number
+) => void;
+
 export class MeshManager {
   static _sectorPool: SectorMesh[] = [];
   static _sectionPool: SectionMesh[] = [];
   static sectorMeshes: DVESectionMeshes;
   static runningUpdate = false;
+
+  static onSectionUpdated: SectionMeshCallback | null = null;
+  static onSectorRemoved: SectorRemovedCallback | null = null;
+  static onVoxelErased: VoxelErasedCallback | null = null;
+
   static updateSection(data: SetSectionMeshTask) {
     compacted.setData(data);
 
@@ -50,11 +72,32 @@ export class MeshManager {
 
  */
     this.sectorMeshes.updateVertexData(section, compacted);
+
+    // Fire splat callback with mesh data
+    if (this.onSectionUpdated) {
+      const sectorKey = `${location[0]}_${location[1]}_${location[2]}_${location[3]}`;
+      const totalMeshes = compacted.getTotalMeshes();
+      const meshes: { materialId: string; vertices: Float32Array; sectionOrigin: [number, number, number] }[] = [];
+      const cbMeshData = new CompactedMeshData();
+      for (let i = 0; i < totalMeshes; i++) {
+        compacted.getMeshData(i, cbMeshData);
+        meshes.push({
+          materialId: cbMeshData.materialId,
+          vertices: cbMeshData.verticies,
+          sectionOrigin: [location[1], location[2], location[3]],
+        });
+      }
+      this.onSectionUpdated(sectorKey, meshes);
+    }
   }
   static removeSector(dimensionId: number, x: number, y: number, z: number) {
+    const sectorKey = `${dimensionId}_${x}_${y}_${z}`;
     const sector = MeshRegister.sectors.remove(dimensionId, x, y, z);
     if (!sector) return false;
     sector.dipose();
+    if (this.onSectorRemoved) {
+      this.onSectorRemoved(sectorKey);
+    }
   }
   static removeSectorAt(data: LocationData) {
     return this.removeSector(...data);

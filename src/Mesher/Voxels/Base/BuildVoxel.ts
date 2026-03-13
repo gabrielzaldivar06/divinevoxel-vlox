@@ -5,6 +5,18 @@ import { VoxelGeometryConstructorRegister } from "../Models/VoxelGeometryConstru
 
   export function BuildVoxel(builder: VoxelModelBuilder): boolean {
     let added = false;
+    // DEBUG: track BuildVoxel calls
+    if (!(globalThis as any).__DVE_BUILD_STATS__) {
+      (globalThis as any).__DVE_BUILD_STATS__ = {
+        calls: 0,
+        geoFound: 0,
+        nodeTypes: [] as string[],
+        addCalled: 0,
+        addReturned: 0,
+      };
+    }
+    const _bs = (globalThis as any).__DVE_BUILD_STATS__;
+    _bs.calls++;
     const hashed = builder.space.getHash(
       builder.nVoxel,
       builder.position.x,
@@ -32,12 +44,17 @@ import { VoxelGeometryConstructorRegister } from "../Models/VoxelGeometryConstru
       const inputsIndex = inputs[i];
       const geoInputs = GeometryLUT.geometryInputs[inputsIndex];
       const geometry = VoxelGeometryConstructorRegister.geometry[nodeId];
+      _bs.geoFound++;
       const nodesLength = geometry.nodes.length;
       for (let k = 0; k < nodesLength; k++) {
         const geo = geometry.nodes[k];
+        if (_bs.nodeTypes.length < 30 && !_bs.nodeTypes.includes(geo.constructor.name)) {
+          _bs.nodeTypes.push(geo.constructor.name);
+        }
         geo.builder = builder;
+        _bs.addCalled++;
         const addedGeo = geo.add(geoInputs[k]);
-        if (addedGeo) added = true;
+        if (addedGeo) { added = true; _bs.addReturned++; }
       }
     }
 

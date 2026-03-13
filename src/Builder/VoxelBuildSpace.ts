@@ -21,6 +21,7 @@ import {
 import { VoxelShapeTemplate } from "../Templates/Shapes/VoxelShapeTemplate";
 import { BoxVoxelShapeSelection } from "../Templates/Shapes/Selections/BoxVoxelShapeSelection";
 import "../Templates/VoxelTemplateRegister";
+import { MeshManager } from "../Renderer/MeshManager.js";
 
 type VoxelSpaceBaseUpdateData<Type extends string, Data extends any> = {
   type: Type;
@@ -237,10 +238,19 @@ export class VoxelBuildSpace {
       ]);
     },
     "erase-voxel": async (update) => {
-      await this.DVER.threads.world.runTaskAsync("erase-voxel", [
-        0,
-        ...update.position,
-      ]);
+      const erasedVoxelId = (await this.DVER.threads.world.runTaskAsync(
+        "erase-voxel",
+        [0, ...update.position]
+      )) as number | undefined;
+      if (MeshManager.onVoxelErased && erasedVoxelId && erasedVoxelId > 0) {
+        MeshManager.onVoxelErased(
+          0,
+          update.position[0],
+          update.position[1],
+          update.position[2],
+          erasedVoxelId
+        );
+      }
     },
     "paint-voxel-template": async (update) => {
       await this.DVER.threads.world.runTaskAsync("paint-voxel-template", [
