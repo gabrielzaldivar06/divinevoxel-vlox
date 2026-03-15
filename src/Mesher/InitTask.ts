@@ -51,7 +51,6 @@ export default function (rendererThread: Thread) {
       let [minY, maxY] = section.getMinMax();
 
       if (Math.abs(minY) == Infinity && Math.abs(maxY) == Infinity) continue;
-      const t = performance.now();
       const transfers: any[] = [];
 
       const sectionMesh = MeshSection(

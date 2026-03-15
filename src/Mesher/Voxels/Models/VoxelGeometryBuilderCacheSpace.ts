@@ -4,6 +4,7 @@ import { VoxelCursor } from "../../../Voxels/Cursor/VoxelCursor";
 import { GetYXZOrderArrayIndex } from "../../../Math/Indexing";
 import { VoxelSchemas } from "../../../Voxels/State/VoxelSchemas";
 import { VoxelLUT } from "../../../Voxels/Data/VoxelLUT";
+import { VoxelLevelReader } from "../../../Voxels/Cursor/VoxelLevelReader";
 export class VoxelGeometryBuilderCacheSpace {
   foundHash: Uint8Array;
   //cache of the voxel ids
@@ -19,6 +20,8 @@ export class VoxelGeometryBuilderCacheSpace {
 
   noCastAO: Uint8Array;
   fullBlock: Uint8Array;
+  //cache of voxel level (0-15 density for surface nets)
+  levelCache: Uint8Array;
   offset: Vec3Array = [0, 0, 0];
 
   voxelCursor = new VoxelCursor();
@@ -34,6 +37,7 @@ export class VoxelGeometryBuilderCacheSpace {
     this.fullBlock = new Uint8Array(volume);
 
     this.noCastAO = new Uint8Array(volume);
+    this.levelCache = new Uint8Array(volume);
   }
   start(x: number, y: number, z: number) {
     this.offset[0] = x;
@@ -49,6 +53,7 @@ export class VoxelGeometryBuilderCacheSpace {
     this.reltionalStateCache.fill(0);
 
     this.noCastAO.fill(0);
+    this.levelCache.fill(0);
   }
 
   getIndex(x: number, y: number, z: number) {
@@ -95,6 +100,10 @@ export class VoxelGeometryBuilderCacheSpace {
 
     this.trueVoxelCache[index] = trueVoxelId;
     this.voxelCache[index] = voxelId;
+
+    //cache level (0-15) for density queries
+    const rawLevel = voxel.getLevel();
+    this.levelCache[index] = rawLevel > 0 ? rawLevel : 15;
 
     if (voxel.isOpaque()) {
       this.foundHash[index] = 2;

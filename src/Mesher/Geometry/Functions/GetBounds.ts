@@ -9,7 +9,7 @@ export function GetBounds(...vectors: Vector3Like[]): [Vec3Array, Vec3Array] {
   let maxY = -Infinity;
   let maxZ = -Infinity;
 
-  const EPSILON = 0;
+  const EPSILON = 1e-4;
   for (let i = 0; i < vectors.length; i++) {
     const {x, y, z} = vectors[i];
 
@@ -21,18 +21,18 @@ export function GetBounds(...vectors: Vector3Like[]): [Vec3Array, Vec3Array] {
     if (z > maxZ) maxZ = z;
   }
 
-  /*   if (maxX - minX < EPSILON) {
+  if (maxX - minX < EPSILON) {
     minX -= EPSILON / 2;
-    maxX += Number.EPSILON / 2;
+    maxX += EPSILON / 2;
   }
   if (maxY - minY < EPSILON) {
-    maxY -= EPSILON / 2;
-    minY += Number.EPSILON / 2;
+    minY -= EPSILON / 2;
+    maxY += EPSILON / 2;
   }
   if (maxZ - minZ < EPSILON) {
-    maxZ -= EPSILON / 2;
-    minZ += EPSILON / 2;
-  } */
+    minZ -= EPSILON / 2;
+    maxZ += EPSILON / 2;
+  }
 
   return [
     [minX, minY, minZ],

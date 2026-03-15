@@ -141,11 +141,10 @@ export class Triangle {
   setUVs([uv1, uv2, uv3]: [Vec2Array, Vec2Array, Vec2Array]) {
     this.uvs.vertices[0].x = uv1[0];
     this.uvs.vertices[0].y = uv1[1];
-    this.uvs.vertices[0].x = uv1[0];
-    this.uvs.vertices[0].y = uv1[1];
-
-    // e.g. this.uvs.set(Vector2Like.FromArray(uv1), Vector2Like.FromArray(uv2), Vector2Like.FromArray(uv3));
-    // Adapt to however your TriVector2VertexData sets 3 corners.
+    this.uvs.vertices[1].x = uv2[0];
+    this.uvs.vertices[1].y = uv2[1];
+    this.uvs.vertices[2].x = uv3[0];
+    this.uvs.vertices[2].y = uv3[1];
     return this;
   }
 

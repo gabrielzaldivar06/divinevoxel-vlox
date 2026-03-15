@@ -8,6 +8,13 @@ export const VoxelMeshVertexConstants = {
   ColorOffset: 14,
   VoxelDataOFfset: 18,
   MetadataOffset: 22,
+  // Dissolution / subdivision data packed into the padding slots and tail floats
+  DissolutionProximityOffset: 3,  // padding[0] — after position xyz
+  PullStrengthOffset: 7,          // padding[1] — after normal xyz
+  SubdivLevelOffset: 11,          // padding[2] — after textureIndex xyz
+  PullDirectionBiasOffset: 17,    // padding[3] — after color rgb
+  SubdivAOOffset: 26,             // tail float 0 — vertex-baked AO
+  PhNormalizedOffset: 27,         // tail float 1 — phase-height normalized
 };
 export class VoxelMeshVertexStructCursor {
   static VertexFloatSize = 28;
@@ -19,6 +26,13 @@ export class VoxelMeshVertexStructCursor {
   static ColorOffset = 14;
   static VoxelDataOFfset = 18;
   static MetadataOffset = 22;
+  // Dissolution / subdivision data packed into the padding slots and tail floats
+  static DissolutionProximityOffset = 3;  // padding[0] — after position xyz
+  static PullStrengthOffset = 7;          // padding[1] — after normal xyz
+  static SubdivLevelOffset = 11;          // padding[2] — after textureIndex xyz
+  static PullDirectionBiasOffset = 17;    // padding[3] — after color rgb
+  static SubdivAOOffset = 26;             // tail float 0 — vertex-baked AO
+  static PhNormalizedOffset = 27;         // tail float 1 — phase-height normalized
 
   // position
   get positionX() {

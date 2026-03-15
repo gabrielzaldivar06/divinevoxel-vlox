@@ -71,9 +71,11 @@ export function MeshTexture(
   textureData: number[],
   origin = Vector3Like.Create(),
   thickness: number | null = null,
+  textureWidth?: number,
+  textureHeight?: number,
 ) {
-  const width = Math.sqrt(textureData.length / 4);
-  const height = Math.sqrt(textureData.length / 4);
+  const width = textureWidth ?? Math.sqrt(textureData.length / 4);
+  const height = textureHeight ?? Math.sqrt(textureData.length / 4);
   const factor = 1 / width;
 
   const data = new TextureVoxelData(width, height, textureData);

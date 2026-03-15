@@ -26,9 +26,10 @@ export class ProtoVertexBuffer {
     if (!this._buffers[bufferIndex])
       this._buffers[bufferIndex] = new Float32Array(this.sectorSize);
 
-    this.curentIndex =
+    this.curentIndex = Math.floor(
       (index * this.vertexFloatSize - bufferIndex * this.sectorSize) /
-      this.vertexFloatSize;
+      this.vertexFloatSize
+    );
     this.currentArray = this._buffers[bufferIndex];
   }
 }

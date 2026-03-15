@@ -264,9 +264,9 @@ export class TriangleScalarVertexData extends TriangleVertexData<number> {
   }
 
   subtract(v1: number, v2: number, v3: number, v4: number) {
-    this.vertices[TriangleVerticies.One] += v1;
-    this.vertices[TriangleVerticies.Two] += v2;
-    this.vertices[TriangleVerticies.Three] += v3;
+    this.vertices[TriangleVerticies.One] -= v1;
+    this.vertices[TriangleVerticies.Two] -= v2;
+    this.vertices[TriangleVerticies.Three] -= v3;
   }
 
   isGreaterThan(v1: number, v2: number, v3: number, v4: number) {

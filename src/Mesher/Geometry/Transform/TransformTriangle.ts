@@ -13,11 +13,11 @@ export function TransformTriangle(
   // Create an array of vertices
   const vertices = [p1, p2, p3];
 
-  // Compute the centroid of the quad
+  // Compute the centroid of the triangle
   const centroid = {
-    x: (p1.x + p2.x + p3.x) / 4,
-    y: (p1.y + p2.y + p3.y) / 4,
-    z: (p1.z + p2.z + p3.z) / 4,
+    x: (p1.x + p2.x + p3.x) / 3,
+    y: (p1.y + p2.y + p3.y) / 3,
+    z: (p1.z + p2.z + p3.z) / 3,
   };
 
   // Initialize effective scales

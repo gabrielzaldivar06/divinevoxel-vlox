@@ -487,6 +487,13 @@ function addVertex(
     position.y + origin.y;
   array[VoxelMeshVertexConstants.PositionOffset + index + 2] =
     position.z + origin.z;
+  // Dissolution padding slots — must be 0 so the dissolution discard guard
+  // (vDissolutionProximity > 0.01) never fires for non-organic regular quads.
+  // SubdivisionBuilder overwrites these with real values for organic vertices.
+  array[index + 3] = 0.0;  // dissolutionProximity
+  array[index + 7] = 0.0;  // pullStrength
+  array[index + 11] = 0.0; // subdivLevel
+  array[index + 17] = 0.0; // pullDirectionBias
 
   array[VoxelMeshVertexConstants.UVOffset + index] = uvs.x;
   array[VoxelMeshVertexConstants.UVOffset + index + 1] = uvs.y;
@@ -515,4 +522,7 @@ function addVertex(
   array[VoxelMeshVertexConstants.MetadataOffset + index + 1] = metadata.y;
   array[VoxelMeshVertexConstants.MetadataOffset + index + 2] = metadata.z;
   array[VoxelMeshVertexConstants.MetadataOffset + index + 3] = metadata.w;
+  // subdivAO neutral sentinel: 0.5 maps smoothstep(0.1,0.9,0.5)→0.5 → dveMicroAO=1.0
+  // (unchanged from pre-dissolution default). Subdivision quads override this in SubdivisionBuilder.
+  array[index + 26] = 0.5;
 }

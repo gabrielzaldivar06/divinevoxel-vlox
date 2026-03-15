@@ -29,16 +29,20 @@ const GRAVITY_BIAS = 0.5;
  * Moderate value — enough curvature to break the cubic silhouette
  * without distorting geometry or opening gaps. 0.25 = 25% of a voxel.
  */
-const BASE_BULGE = 0.18;
+const BASE_BULGE = 0.24;
 
-/** Displacement scale for edge-midpoint sub-vertices (vs 1.0 for interior). */
-const EDGE_DISPLACE_FACTOR = 0.5;
+/** Displacement scale for edge-midpoint sub-vertices (vs 1.0 for interior).
+ * High value ensures strong curvature at block boundaries — visually fuses adjacent blocks. */
+const EDGE_DISPLACE_FACTOR = 0.82;
 
 /** Displacement scale for corner sub-vertices — shared by up to 4 adjacent voxels. */
-const CORNER_DISPLACE_FACTOR = 0.22;
+const CORNER_DISPLACE_FACTOR = 0.52;
 
-/** Depression scale for air-exposed edges/corners (pulls INWARD below surface). */
-const AIR_DEPRESS_FACTOR = 0.7;
+/** Depression scale for air-exposed edges/corners (pulls INWARD below surface).
+ * Set to 0 to keep exposed edge vertices at the block boundary — prevents visible
+ * seams/gaps at mixed-type block boundaries (stone/water, stone/sand, etc.).
+ * The organic pillow effect is preserved via EDGE_DISPLACE_FACTOR on inter-voxel edges. */
+const AIR_DEPRESS_FACTOR = 0.0;
 // R06: AO ray directions for vertex-baked ambient occlusion.
 // 5 short downward/diagonal rays cast into the voxel grid per sub-vertex.
 // Covers the hemisphere most relevant for organic ground-facing surfaces.
@@ -261,6 +265,29 @@ function getGrainDirection(
 }
 
 // ------------------------------------------------------------------
+//  Helper: read a neighbour voxel's effective pull strength.
+//  Used for Gaussian corner blending (Idea 2) — called ≤4 times per face.
+// ------------------------------------------------------------------
+function getNeighborPull(
+  builder: VoxelModelBuilder,
+  dx: number, dy: number, dz: number
+): number {
+  const pos = builder.position;
+  const hashed = builder.space.getHash(builder.nVoxel, pos.x + dx, pos.y + dy, pos.z + dz);
+  if (builder.space.foundHash[hashed] < 2) return 0;
+  const neighborId = builder.space.trueVoxelCache[hashed];
+  const tags = VoxelTagsRegister.VoxelTags[neighborId];
+  if (!tags) return 0;
+  const adhesion = (tags[VoxelTagIds.adhesion] as number) ?? 0;
+  const shearStrength = (tags[VoxelTagIds.shearStrength] as number) ?? 100;
+  const porosity = (tags[VoxelTagIds.porosity] as number) ?? 0;
+  const densityFactor = 1 - Math.min(shearStrength / 5000, 0.6);
+  const porosityBoost = 1.0 + porosity * 0.4;
+  const intensityMult = (EngineSettings.settings.terrain as any).dissolutionIntensity ?? 1.0;
+  return Math.min((BASE_BULGE + adhesion * PULL_SCALE * densityFactor) * porosityBoost * intensityMult, MAX_PULL);
+}
+
+// ------------------------------------------------------------------
 //  Core: buildSubdividedFace
 // ------------------------------------------------------------------
 /**
@@ -351,6 +378,11 @@ export function buildSubdividedFace(
   const bulgeVariation = 0.7 + bulgeHash * 0.6; // range [0.7, 1.3]
   // Base bulge is always applied to every organic face for visible curvature
   const adhesionBonus = pullConfig.adhesion * PULL_SCALE * densityFactor;
+  // totalPullBase: material-only pull (no per-block bulgeVariation hash).
+  // Used at block-boundary vertices so both sides of a shared edge compute
+  // the same displacement → zero-gap seams.
+  const totalPullBase = Math.min((BASE_BULGE + adhesionBonus) * porosityBoost * intensityMult, MAX_PULL);
+  // totalPull: adds per-block organic variation — used only for interior sub-vertices.
   const totalPull = Math.min((BASE_BULGE * bulgeVariation + adhesionBonus) * porosityBoost * intensityMult, MAX_PULL);
 
   // Grain direction for anisotropic pull
@@ -374,6 +406,35 @@ export function buildSubdividedFace(
   // Weathering factor from topExposure-like data
   // We approximate: edgeBoundary serves as exposure proxy
   const weathering = edgeBoundary;
+
+  // ------------------------------------------------------------------
+  //  Idea 1 — Asymmetric pillow constants (one set per face, not per vertex).
+  //  dve_asymBiasS/T shift the interior bump peak off-centre via hash,
+  //  so every block has a uniquely shaped bulge instead of a perfect pillow.
+  //  pH drives curve sharpness: acid (low phNorm) → sharp power-ridge.
+  //  High adhesion → gooey smoothstep mound (mud, clay, moss).
+  // ------------------------------------------------------------------
+  const dve_asymBiasS = Math.sin(voxX * 7.31 + voxZ * 13.17 + voxY * 3.7) * 0.50;  // [-0.5, +0.5]
+  const dve_asymBiasT = Math.sin(voxZ * 11.73 + voxY * 5.31 + voxX * 19.1) * 0.50;
+  const dve_phSharpness = 0.5 + (1.0 - phNorm) * 2.5; // 0.5 (pH14 pillow) … 3.0 (pH0 sharp ridge)
+  const dve_isGooey = pullConfig.adhesion > 0.4;
+
+  // ------------------------------------------------------------------
+  //  Idea 2 — Gaussian corner blending: precompute pull of the 4 cardinal
+  //  face-adjacent neighbours so corner sub-vertices can inherit pull from
+  //  adjacent organic blocks, fusing geometry into continuous organic lobes.
+  // ------------------------------------------------------------------
+  const adj4 = edgeAdjacency[face];
+  const _c0 = cardinalOffsets[adj4[0]];
+  const _c1 = cardinalOffsets[adj4[1]];
+  const _c2 = cardinalOffsets[adj4[2]];
+  const _c3 = cardinalOffsets[adj4[3]];
+  const adjPulls: number[] = [
+    getNeighborPull(builder, _c0[0], _c0[1], _c0[2]),
+    getNeighborPull(builder, _c1[0], _c1[1], _c1[2]),
+    getNeighborPull(builder, _c2[0], _c2[1], _c2[2]),
+    getNeighborPull(builder, _c3[0], _c3[1], _c3[2]),
+  ];
 
   // ------------------------------------------------------------------
   //  Generate (N+1) × (N+1) grid of sub-vertex positions
@@ -421,6 +482,10 @@ export function buildSubdividedFace(
       // ----------------------------------------------------------
       const adj = edgeAdjacency[face];
       let displaceFactor: number;
+      // activePull: pull used in the final displacement formula.
+      // Interior vertices use totalPull (with hash variation);
+      // boundary vertices use totalPullBase or neighbor-averaged value.
+      let activePull = totalPull;
       let pullDirX = faceNormal[0];
       let pullDirY = faceNormal[1];
       let pullDirZ = faceNormal[2];
@@ -440,11 +505,32 @@ export function buildSubdividedFace(
           pullDirY = -faceNormal[1];
           pullDirZ = -faceNormal[2];
         } else if (!jExp && !iExp) {
-          // Inter-voxel corner → face normal for continuity
+          // Inter-voxel corner: all 4 blocks sharing this corner must land at the
+          // exact same vertex position.
+          //
+          // Direction: faceNormal only.
+          //   Any bisector (3-way or otherwise) uses the SAME BLOCK's adjacent face
+          //   directions (East, North...) — which are OPPOSITE (+X vs -X) when seen
+          //   from the neighboring block. This creates symmetric divergence = gap.
+          //   faceNormal is identical for all blocks sharing this corner. ✓
+          //
+          // Magnitude: equal-weight average of all 4 surrounding blocks' pulls.
+          //   Block A: (A+B+C+D)/4; Block B: (B+A+D+C)/4 = same ✓
+          const jAdjIdx = j === N ? 0 : 2;
+          const iAdjIdx = i === N ? 1 : 3;
+          const pullJ = adjPulls[jAdjIdx];
+          const pullI = adjPulls[iAdjIdx];
+          const jDir = cardinalOffsets[adj[jAdjIdx]];
+          const iDir = cardinalOffsets[adj[iAdjIdx]];
+          const pullD = getNeighborPull(builder, jDir[0] + iDir[0], jDir[1] + iDir[1], jDir[2] + iDir[2]);
+          activePull = (totalPullBase + pullJ + pullI + pullD) * 0.25;
           displaceFactor = dve_cornerFactor;
+          // pullDir stays as faceNormal (set at the top of the loop) — no change needed.
         } else {
-          // Mixed: one air, one solid → reduced face-normal lift
-          displaceFactor = dve_cornerFactor * 0.3;
+          // Mixed corner: one neighbor air, one solid — apply half of corner factor.
+          displaceFactor = dve_cornerFactor * 0.4;
+          activePull = totalPullBase;
+          // pullDir stays as faceNormal — neutral direction, no divergence.
         }
       } else if (isOnEdge) {
         let adjFace: VoxelFaces;
@@ -471,8 +557,16 @@ export function buildSubdividedFace(
             pullDirZ = -faceNormal[2];
           }
         } else {
-          // Inter-voxel edge → pure face normal for continuity
+          // Inter-voxel edge: pull along faceNormal only.
+          //   A bisector normalize(faceNormal + East) from block A =  [+0.707, 0.707, 0]
+          //   A bisector normalize(faceNormal + West) from block B = [-0.707, 0.707, 0]
+          //   The X components DIVERGE → permanent gap.
+          //   faceNormal = [0,1,0] from both sides → always same direction. ✓
           displaceFactor = EDGE_DISPLACE_FACTOR;
+          // pullDir already set to faceNormal at the top of the loop — no change needed.
+          const edgeAdjDir = cardinalOffsets[adjFace];
+          const edgeNeighborPull = getNeighborPull(builder, edgeAdjDir[0], edgeAdjDir[1], edgeAdjDir[2]);
+          activePull = (totalPullBase + edgeNeighborPull) * 0.5;
         }
       } else {
         // Interior vertex → full displacement
@@ -522,15 +616,44 @@ export function buildSubdividedFace(
         // Outward bulge along face normal with noise variation
         // "Pillow" shape: max bulge at center of face, tapering to edges
         const centerDist = Math.min(edgeDistS, edgeDistT); // 0 at edge, 1 at center
-        const pillowFactor = Math.sin(centerDist * Math.PI * 0.5);
-        const pillowSq = (isOnEdge || isCorner) ? 1.0 : pillowFactor * pillowFactor;
 
-        // Per-vertex noise modulation for organic irregularity
-        const noiseVal = erosionFBM(worldX * 2.3, worldY * 2.3, worldZ * 2.3, weathering);
+      // Idea 1 — Asymmetric interior bulge: shift the pillow peak off-centre.
+      // Bias is strongest at face centre (s=t=0.5), fades to 0 at edges so
+      // edge/corner vertices always connect cleanly to neighbouring faces.
+      let pillowSq: number;
+      if (isOnEdge || isCorner) {
+        pillowSq = 1.0;
+      } else {
+        const sBias = dve_asymBiasS * (0.5 - Math.abs(s - 0.5)) * 2.0;
+        const tBias = dve_asymBiasT * (0.5 - Math.abs(t - 0.5)) * 2.0;
+        const sShifted = Math.max(0.01, Math.min(0.99, s + sBias));
+        const tShifted = Math.max(0.01, Math.min(0.99, t + tBias));
+        const shiftedEdgeS = Math.min(sShifted, 1.0 - sShifted) * 2.0;
+        const shiftedEdgeT = Math.min(tShifted, 1.0 - tShifted) * 2.0;
+        const shiftedDist  = Math.min(shiftedEdgeS, shiftedEdgeT);
+        let pf: number;
+        if (dve_isGooey) {
+          // High adhesion (mud, clay, moss): smoothstep full mound — no squared taper
+          pf = shiftedDist * shiftedDist * (3.0 - 2.0 * shiftedDist);
+        } else if (phNorm < 0.36) {
+          // Acid material (pH < 5): sharp asymmetric power-curve ridge
+          pf = Math.pow(Math.max(0.0, shiftedDist), dve_phSharpness);
+        } else {
+          // Default: smooth sin pillow (shifted)
+          pf = Math.sin(shiftedDist * Math.PI * 0.5);
+        }
+        pillowSq = pf * pf;
+      }
+
+        // Per-vertex noise modulation for organic irregularity.
+        // Boundary vertices use weathering=0 so noiseMod is purely world-position
+        // based — both blocks sharing the edge will compute the same value.
+        const noiseWeathering = (isOnEdge || isCorner) ? 0 : weathering;
+        const noiseVal = erosionFBM(worldX * 2.3, worldY * 2.3, worldZ * 2.3, noiseWeathering);
         // noiseVal is in [0.7, 1.3]; remap to [0.5, 1.5] for more variation
         const noiseMod = (noiseVal - 0.7) / 0.6 * 1.0 + 0.5;
 
-        const displacement = totalPull * pillowSq * noiseMod * displaceFactor;
+        const displacement = activePull * pillowSq * noiseMod * displaceFactor;
 
         // pullDir was already computed above (face normal, negative bisector, etc.)
         _pullVector.x = pullDirX * displacement;
@@ -652,13 +775,13 @@ export function buildSubdividedFace(
         const iAdj = vi === N ? adjTable[1] : adjTable[3];
         // Smooth only when BOTH adjacent directions border solid voxels
         if (exposedFaces[jAdj] || exposedFaces[iAdj]) continue;
-        const jN = VoxelFaceDirections[jAdj];
-        const iN = VoxelFaceDirections[iAdj];
         const cur = subNormals[vj * gridSize + vi];
-        // cur gets 2x weight, each adjacent face normal 1x (50/25/25 blend)
-        let bx = cur[0] * 2 + jN[0] + iN[0];
-        let by = cur[1] * 2 + jN[1] + iN[1];
-        let bz = cur[2] * 2 + jN[2] + iN[2];
+        // Blend toward faceNormal (not adj face normals).
+        // Both blocks sharing this corner compute the same blend target (faceNormal) →
+        // corner normals converge to the same value from all sides. No shading seam. ✓
+        let bx = cur[0] + faceNormal[0] * 2;
+        let by = cur[1] + faceNormal[1] * 2;
+        let bz = cur[2] + faceNormal[2] * 2;
         const bLen = Math.sqrt(bx * bx + by * by + bz * bz) || 1;
         subNormals[vj * gridSize + vi] = [bx / bLen, by / bLen, bz / bLen];
       } else {
@@ -669,12 +792,14 @@ export function buildSubdividedFace(
         else if (vj === 0) adjFace = adjTable[2];
         else               adjFace = adjTable[3]; // vi === 0
         if (exposedFaces[adjFace]) continue; // air-exposed edge — keep depression, no smooth
-        const adjN = VoxelFaceDirections[adjFace];
         const cur  = subNormals[vj * gridSize + vi];
-        // 50/50: current averaged normal + adjacent face's cardinal normal
-        let bx = cur[0] + adjN[0];
-        let by = cur[1] + adjN[1];
-        let bz = cur[2] + adjN[2];
+        // Blend toward faceNormal (same blend target from both sides of the block boundary).
+        // Block A (right edge): normalize(localN_A + faceNormal) ≈ faceNormal
+        // Block B (left edge):  normalize(localN_B + faceNormal) ≈ faceNormal
+        // → both converge to the same normal → no shading crease. ✓
+        let bx = cur[0] + faceNormal[0] * 2;
+        let by = cur[1] + faceNormal[1] * 2;
+        let bz = cur[2] + faceNormal[2] * 2;
         const bLen = Math.sqrt(bx * bx + by * by + bz * bz) || 1;
         subNormals[vj * gridSize + vi] = [bx / bLen, by / bLen, bz / bLen];
       }

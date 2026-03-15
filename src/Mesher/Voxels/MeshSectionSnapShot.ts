@@ -1,8 +1,7 @@
 import type { SetSectionMeshTask } from "../Types/Mesher.types";
-//tools
-import { MeshSectionBase } from "./Base/MeshSectionBase";
 import { SectionSnapShot } from "../../World/SnapShot/SectionSnapShot";
 import { SectionSnapshotCursor } from "../../World/SnapShot/SectionSnapShotCursor";
+import { MeshSectionWithCursors } from "./MeshSection";
 
 let snapShotCursor: SectionSnapshotCursor;
 export function MeshSectionSnapShot(
@@ -14,5 +13,5 @@ export function MeshSectionSnapShot(
   snapShotCursor.setSectionSnapShot(snapShot);
   const sectionCursor = snapShotCursor.getCenteralCursor();
   if (!sectionCursor) return null;
-  return MeshSectionBase(snapShotCursor, sectionCursor, location, transfers);
+  return MeshSectionWithCursors(snapShotCursor, sectionCursor, location, transfers);
 }

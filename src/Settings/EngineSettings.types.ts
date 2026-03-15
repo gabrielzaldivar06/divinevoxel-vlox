@@ -83,7 +83,8 @@ export class TerrainSettingsData {
     | "pbr-premium"
     | "pbr-premium-v2"
     | "pbr-surface-lod"
-    | "phase-4-geometry" = "off";
+    | "phase-4-geometry"
+    | "definitivo" = "off";
   benchmarkLabel = "default";
   defaultTextureUpscale = 1;
   defaultSharpTextureSampling = false;
@@ -92,6 +93,8 @@ export class TerrainSettingsData {
   dissolutionIntensity = 1.0;
   dissolutionSplats = false;
   dissolutionTemporal = false;
+  surfaceNets = false;
+  surfaceNetsIsoLevel = 8;
   atmosphericSplats = false;
   lodMorph = false;
   /**
