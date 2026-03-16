@@ -18,7 +18,7 @@ import { BuildVoxel } from "./BuildVoxel";
 let space: VoxelGeometryBuilderCacheSpace;
 const bvhTool = new VoxelMeshBVHBuilder();
 
-function meshVoxel(
+export function meshVoxel(
   x: number,
   y: number,
   z: number,

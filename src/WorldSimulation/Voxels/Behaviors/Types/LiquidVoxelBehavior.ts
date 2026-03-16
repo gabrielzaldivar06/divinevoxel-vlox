@@ -1,9 +1,11 @@
 import { CardinalNeighbors2D, CardinalNeighbors3D } from "../../../../Math/CardinalNeighbors";
+import { EngineSettings } from "../../../../Settings/EngineSettings";
 import { VoxelBehaviorsRegister } from "../VoxelBehaviorsRegister";
 
 VoxelBehaviorsRegister.register({
   type: "dve_liquid",
   needUpdate(simulation, voxel, x, y, z) {
+    if (!EngineSettings.doFlow) return false;
     let scheduleUpdate = false;
    for (let i = 0; i < CardinalNeighbors2D.length; i++) {
       const nx = CardinalNeighbors2D[i][0] + x;
@@ -24,9 +26,11 @@ VoxelBehaviorsRegister.register({
     return scheduleUpdate;
   },
   onPaint(simulation, voxel, x, y, z) {
+    if (!EngineSettings.doFlow) return;
     simulation.scheduleUpdate("dve_liquid", x, y, z, 0);
   },
   onErase(simulation, voxel, x, y, z) {
+    if (!EngineSettings.doFlow) return;
     voxel.setLevelState(2);
     for (let i = 0; i < CardinalNeighbors3D.length; i++) {
       const nx = CardinalNeighbors3D[i][0] + x;

@@ -21,6 +21,7 @@ import { GetTexture } from "../Models/Common/GetTexture";
 import { QuadVoxelGometryInputs } from "../Models/Nodes/Types/QuadVoxelGometryNodeTypes";
 import { BaseVoxelGeometryTextureProcedureData } from "../Models/Procedures/TextureProcedure";
 
+
 let space: VoxelGeometryBuilderCacheSpace;
 const bvhTool = new VoxelMeshBVHBuilder();
 
@@ -29,6 +30,15 @@ const ArgIndexes = QuadVoxelGometryInputs.ArgIndexes;
 function getIsoThreshold(): number {
   return EngineSettings.settings.terrain.surfaceNetsIsoLevel / 15;
 }
+
+/**
+ * Fluid iso threshold.
+ * Water is painted with level=7 → density 7/15 ≈ 0.467.
+ * Threshold of 4/15 ≈ 0.267 ensures any voxel with level >= 4 counts as
+ * "inside" the fluid volume while still allowing the top fluid cell to
+ * terminate cleanly against real air above sea level.
+ */
+const FLUID_ISO_THRESHOLD = 4 / 15;
 
 // 8 corners of a 2x2x2 cube, starting from (0,0,0)
 const CORNER_OFFSETS: [number, number, number][] = [
@@ -60,13 +70,6 @@ const AXIS_QUADS: [number, number, number][][] = [
   [[0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0]],
 ];
 
-const AXIS_TO_FACE_POS: VoxelFaces[] = [
-  VoxelFaces.East, VoxelFaces.Up, VoxelFaces.North,
-];
-const AXIS_TO_FACE_NEG: VoxelFaces[] = [
-  VoxelFaces.West, VoxelFaces.Down, VoxelFaces.South,
-];
-
 const padding = Vector3Like.Create(5, 5, 5);
 const emitQuad = Quad.Create();
 
@@ -74,23 +77,36 @@ const emitQuad = Quad.Create();
 const _qPos: [Vec3Array, Vec3Array, Vec3Array, Vec3Array] = [
   [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
 ];
+// ─── Module-level typed buffers ───────────────────────────────────────────────
+// All reused across calls to avoid GC pressure.
 
-// --- Module-level reusable buffers (Fix #1: no per-call GC pressure) ---
+// Terrain solid density field
 let _densityGrid: Float32Array | null = null;
+let _lastDensitySize = 0;
+
+// Fluid density field (separate from terrain — different threshold, different material)
+let _fluidGrid: Float32Array | null = null;
+
+// Terrain surface vertices
 let _vertX: Float32Array | null = null;
 let _vertY: Float32Array | null = null;
 let _vertZ: Float32Array | null = null;
 let _vertMat: Int16Array | null = null;
 let _vertExists: Uint8Array | null = null;
-let _lastDensitySize = 0;
 let _lastVertSize = 0;
 
-// Reusable array for corner densities (Fix #1: avoid per-cell allocation)
+// Fluid surface vertices (flat layer with wave displacement)
+let _fluidVertY: Float32Array | null = null;
+let _fluidVertMat: Int16Array | null = null;
+let _fluidVertExists: Uint8Array | null = null;
+
+// Per-cell corner density scratch buffer
 const _cornerDensities = new Float64Array(8);
 
 function ensureBuffers(densitySize: number, vertSize: number) {
   if (densitySize > _lastDensitySize) {
     _densityGrid = new Float32Array(densitySize);
+    _fluidGrid = new Float32Array(densitySize);
     _lastDensitySize = densitySize;
   }
   if (vertSize > _lastVertSize) {
@@ -99,6 +115,9 @@ function ensureBuffers(densitySize: number, vertSize: number) {
     _vertZ = new Float32Array(vertSize);
     _vertMat = new Int16Array(vertSize);
     _vertExists = new Uint8Array(vertSize);
+    _fluidVertY = new Float32Array(vertSize);
+    _fluidVertMat = new Int16Array(vertSize);
+    _fluidVertExists = new Uint8Array(vertSize);
     _lastVertSize = vertSize;
   }
 }
@@ -118,17 +137,22 @@ function cellVertIndex(lx: number, ly: number, lz: number): number {
 }
 
 /**
- * Look up the density at a world position via the cache space.
- * Returns 0.0 for air, level/15 for solid (default 1.0 if level==0 on solid).
+ * Terrain solid density — reads opaque voxels only (foundHash == 2).
+ * Transparent/fluid voxels return 0 so they don't affect the terrain surface.
  */
-function getDensity(
-  nVoxel: DataCursorInterface,
-  x: number,
-  y: number,
-  z: number,
-): number {
+function getSolidDensity(nVoxel: DataCursorInterface, x: number, y: number, z: number): number {
   const hashed = space.getHash(nVoxel, x, y, z);
-  if (space.foundHash[hashed] < 2) return 0;
+  if (space.foundHash[hashed] !== 2) return 0;
+  return space.levelCache[hashed] / 15;
+}
+
+/**
+ * Fluid density — reads transparent voxels only (foundHash == 3).
+ * Solid terrain returns 0 so the fluid surface doesn't bleed into rock.
+ */
+function getFluidDensity(nVoxel: DataCursorInterface, x: number, y: number, z: number): number {
+  const hashed = space.getHash(nVoxel, x, y, z);
+  if (space.foundHash[hashed] !== 3) return 0;
   return space.levelCache[hashed] / 15;
 }
 
@@ -144,6 +168,52 @@ function getMaterialIndex(
   const hashed = space.getHash(nVoxel, x, y, z);
   if (space.foundHash[hashed] < 2) return -1;
   return VoxelLUT.materialMap[space.trueVoxelCache[hashed]];
+}
+
+/**
+ * Get the material index for a fluid voxel (foundHash == 3) at the given
+ * position, or search the 6 face-neighbors for the nearest fluid voxel.
+ * Used for fluid quads at injected terrain cells where the cell itself
+ * is solid but the water surface extends over it.
+ */
+function getFluidMaterialNearby(
+  nVoxel: DataCursorInterface,
+  x: number, y: number, z: number,
+): number {
+  // Direct lookup
+  let h = space.getHash(nVoxel, x, y, z);
+  if (space.foundHash[h] === 3) return VoxelLUT.materialMap[space.trueVoxelCache[h]];
+  // Búsqueda extendida hacia el interior de la isla (para garantizar que el quad se emite)
+  for (let dy = 0; dy >= -1; dy--) {
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        h = space.getHash(nVoxel, x + dx, y + dy, z + dz);
+        if (space.foundHash[h] === 3) return VoxelLUT.materialMap[space.trueVoxelCache[h]];
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Find the world position of the nearest fluid voxel (foundHash == 3)
+ * for texture/shader lookup on coast-transition quads.
+ */
+function findNearbyFluidVoxel(
+  nVoxel: DataCursorInterface,
+  x: number, y: number, z: number,
+): [number, number, number] {
+  let h = space.getHash(nVoxel, x, y, z);
+  if (space.foundHash[h] === 3) return [x, y, z];
+  for (let dy = 0; dy >= -1; dy--) {
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        h = space.getHash(nVoxel, x + dx, y + dy, z + dz);
+        if (space.foundHash[h] === 3) return [x + dx, y + dy, z + dz];
+      }
+    }
+  }
+  return [x, y, z];
 }
 
 /**
@@ -300,8 +370,113 @@ function resolveTexture(
     }
   }
 
+  // Surface Nets produces quads at arbitrary orientations that may not match
+  // any face in the voxel's geometry definition. Try ALL faces as fallback
+  // before giving up — the visual difference between face textures is minimal
+  // on smooth isosurfaces.
+  const allFaces = [VoxelFaces.Up, VoxelFaces.Down, VoxelFaces.North, VoxelFaces.South, VoxelFaces.East, VoxelFaces.West];
+  for (const fallbackFace of allFaces) {
+    if (fallbackFace === closestFace) continue;
+    if (geometryPaletteIds && geometryInputPaletteIds) {
+      for (let gs = 0; gs < geometryPaletteIds.length; gs++) {
+        const compiled = GeometryLUT.compiledGeometry[geometryPaletteIds[gs]];
+        const inputs = GeometryLUT.geometryInputs[geometryInputPaletteIds[gs]];
+        if (!compiled || !inputs) continue;
+        for (let ni = 0; ni < compiled.length; ni++) {
+          const nd = compiled[ni];
+          if (nd.type !== "quad") continue;
+          const args = inputs[ni];
+          if (!args) continue;
+          if (nd.closestFace === fallbackFace && trySetTexture(args[ArgIndexes.Texture])) return;
+        }
+      }
+    }
+  }
+
   builder.vars.textureIndex = 0;
 }
+
+// ─── Quad emitter helpers ──────────────────────────────────────────────────────
+
+function emitSolidQuad(
+  builder: VoxelModelBuilder,
+  worldCursor: DataCursorInterface,
+  positions: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+  inside0: boolean,
+  axis: number,
+  wx: number, wy: number, wz: number,
+  solidX: number, solidY: number, solidZ: number,
+) {
+  if (!inside0) {
+    const t0 = positions[1][0], t1 = positions[1][1], t2 = positions[1][2];
+    positions[1][0] = positions[3][0]; positions[1][1] = positions[3][1]; positions[1][2] = positions[3][2];
+    positions[3][0] = t0; positions[3][1] = t1; positions[3][2] = t2;
+  }
+
+  emitQuad.setPositions(positions);
+  emitQuad.setUVs(Quad.FullUVs as any);
+  emitQuad.doubleSided = false;
+
+  const dominantFace = closestVoxelFace(emitQuad.normals.vertices[0]);
+
+  builder.origin.x = 0; builder.origin.y = 0; builder.origin.z = 0;
+  builder.position.x = wx; builder.position.y = wy; builder.position.z = wz;
+  builder.nVoxel = worldCursor;
+
+  const solidVoxel = worldCursor.getVoxel(solidX, solidY, solidZ);
+  if (!solidVoxel) return;
+  builder.voxel = solidVoxel;
+
+  builder.vars.light.setAll(0);
+  builder.vars.ao.setAll(0);
+  ShadeSurfaceNetsFace(builder, dominantFace, positions);
+  resolveTexture(builder, worldCursor, solidX, solidY, solidZ, dominantFace, emitQuad);
+
+  builder.startConstruction();
+  addVoxelQuad(builder, emitQuad);
+  builder.updateBounds(emitQuad.bounds);
+  builder.endConstruction();
+}
+
+/**
+ * Emit a fluid surface quad (Y-axis only — water top face).
+ *
+ * Fluid quads are always horizontal (VoxelFaces.Up). AO is skipped —
+ * the PBR liquid shader handles its own shading.
+ */
+function emitFluidQuad(
+  builder: VoxelModelBuilder,
+  worldCursor: DataCursorInterface,
+  positions: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
+  wx: number, wy: number, wz: number,
+  fluidX: number, fluidY: number, fluidZ: number,
+) {
+  emitQuad.setPositions(positions);
+  emitQuad.setUVs(Quad.FullUVs as any);
+  emitQuad.doubleSided = false;
+
+  const dominantFace = closestVoxelFace(emitQuad.normals.vertices[0]);
+
+  builder.origin.x = 0; builder.origin.y = 0; builder.origin.z = 0;
+  builder.position.x = wx; builder.position.y = wy; builder.position.z = wz;
+  builder.nVoxel = worldCursor;
+
+  const fluidVoxel = worldCursor.getVoxel(fluidX, fluidY, fluidZ);
+  if (!fluidVoxel) return;
+  builder.voxel = fluidVoxel;
+
+  builder.vars.light.setAll(15);
+  builder.vars.ao.setAll(0);
+  ShadeSurfaceNetsFace(builder, dominantFace, positions);
+  resolveTexture(builder, worldCursor, fluidX, fluidY, fluidZ, dominantFace, emitQuad);
+
+  builder.startConstruction();
+  addVoxelQuad(builder, emitQuad);
+  builder.updateBounds(emitQuad.bounds);
+  builder.endConstruction();
+}
+
+// ─── Main mesher ──────────────────────────────────────────────────────────────
 
 export function MeshSectionSurfaceNets(
   worldCursor: DataCursorInterface,
@@ -364,20 +539,71 @@ export function MeshSectionSurfaceNets(
 
   // Reset only the used portion of each buffer
   _densityGrid!.fill(0, 0, densitySize);
+  _fluidGrid!.fill(0, 0, densitySize);
   _vertExists!.fill(0, 0, vertSize);
   _vertMat!.fill(-1, 0, vertSize);
+  _fluidVertExists!.fill(0, 0, vertSize);
+  _fluidVertMat!.fill(-1, 0, vertSize);
 
-  // --- Phase 0: Pre-compute density grid (Fix #3: no redundant getDensity) ---
-  // Grid points span lx ∈ [-1, gridX], ly ∈ [-1, gridY], lz ∈ [-1, gridZ].
+  const seaLevel = (EngineSettings.settings.terrain as any).seaLevel ?? 32;
+
+  // ── Phase 0: Pre-compute both density grids ──────────────────────────────
+  // Terrain solid and fluid are sampled separately so their fields don't
+  // interfere. A single world position contributes to at most one field.
   for (let ly = -1; ly <= gridY; ly++) {
     for (let lx = -1; lx <= gridX; lx++) {
       for (let lz = -1; lz <= gridZ; lz++) {
-        _densityGrid![densityPointIndex(lx, ly, lz)] = getDensity(
-          worldCursor,
-          cx + lx,
-          cy + ly,
-          cz + lz,
-        );
+        const wx = cx + lx, wy = cy + ly, wz = cz + lz;
+        const di = densityPointIndex(lx, ly, lz);
+        _densityGrid![di] = getSolidDensity(worldCursor, wx, wy, wz);
+        _fluidGrid![di] = getFluidDensity(worldCursor, wx, wy, wz);
+      }
+    }
+  }
+
+  // ── Phase 0.5: Inject fluid density for coastal water surface ───────────
+  // Debug path: keep coastal extension simple and tied to real nearby water.
+  // If a terrain column sits next to existing fluid, extend that water up to
+  // sea level so the shoreline remains continuous without complex silhouette
+  // tests against the terrain surface.
+  for (let lx = -1; lx <= gridX; lx++) {
+    for (let lz = -1; lz <= gridZ; lz++) {
+      let hasSolid = false;
+      for (let ly = gridY; ly >= -1; ly--) {
+        const di = densityPointIndex(lx, ly, lz);
+        if (_densityGrid![di] >= isoThreshold) {
+          hasSolid = true;
+          break;
+        }
+      }
+
+      if (!hasSolid) continue;
+
+      let touchesRealFluid = false;
+      for (let dx = -2; dx <= 2 && !touchesRealFluid; dx++) {
+        for (let dz = -2; dz <= 2 && !touchesRealFluid; dz++) {
+          for (let ly = -1; ly <= gridY; ly++) {
+            const wy = cy + ly;
+            if (wy > seaLevel) continue;
+            const di = densityPointIndex(lx + dx, ly, lz + dz);
+            if (_fluidGrid![di] >= FLUID_ISO_THRESHOLD) {
+              touchesRealFluid = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!touchesRealFluid) continue;
+
+      // Fill fluid through seaLevel in shoreline-adjacent columns.
+      for (let ly = -1; ly <= gridY; ly++) {
+        const wy = cy + ly;
+        if (wy > seaLevel) continue;
+        const di = densityPointIndex(lx, ly, lz);
+        if (_fluidGrid![di] < FLUID_ISO_THRESHOLD) {
+          _fluidGrid![di] = 1;
+        }
       }
     }
   }
@@ -461,9 +687,49 @@ export function MeshSectionSurfaceNets(
     }
   }
 
-  // --- Phase 2: Emit quads at sign-change edges ---
-  // For each cell in the section [0, gridN), check +X/+Y/+Z edges.
-  // AXIS_QUADS offsets go to -1, which is now within the padded grid (Fix #4+#8).
+  // ── Phase 1b: Compute fluid surface vertices ─────────────────────────────
+  //
+  // Fluid vertices are only placed for Y-axis sign changes (horizontal surface).
+  // The Y position includes wave displacement for natural undulation.
+  // Vertical/lateral fluid faces are intentionally omitted — the underwater
+  // interior is never visible.
+  for (let ly = -1; ly < gridY; ly++) {
+    for (let lx = -1; lx < gridX; lx++) {
+      for (let lz = -1; lz < gridZ; lz++) {
+        const dBot = _fluidGrid![densityPointIndex(lx, ly, lz)];
+        const dTop = _fluidGrid![densityPointIndex(lx, ly + 1, lz)];
+
+        const botInside = dBot >= FLUID_ISO_THRESHOLD;
+        const topInside = dTop >= FLUID_ISO_THRESHOLD;
+
+        // We want the top surface: fluid below, air/terrain above
+        if (!botInside || topInside) continue;
+
+        // Interpolate against real air above the water column. Without the
+        // old synthetic shell, this keeps the surface inside the current cell
+        // and aligned with the actual fluid density field.
+        const t = Math.max(
+          0,
+          Math.min(1, (FLUID_ISO_THRESHOLD - dBot) / (dTop - dBot)),
+        );
+        const surfaceY = cy + ly + t;
+
+        const wx = cx + lx, wz = cz + lz;
+        const idx = cellVertIndex(lx, ly, lz);
+
+        // Keep the water mesh itself stable. Animated motion belongs in the
+        // shader so coast contact and depth interactions do not drift.
+        _fluidVertY![idx] = surfaceY;
+        _fluidVertExists![idx] = 1;
+
+        // Material: prefer nearby fluid voxel (water) over terrain
+        const mat = getFluidMaterialNearby(worldCursor, wx, cy + ly, wz);
+        _fluidVertMat![idx] = mat;
+      }
+    }
+  }
+
+  // ── Phase 2a: Emit terrain quads ─────────────────────────────────────────
   for (let ly = 0; ly < gridY; ly++) {
     for (let lx = 0; lx < gridX; lx++) {
       for (let lz = 0; lz < gridZ; lz++) {
@@ -516,7 +782,6 @@ export function MeshSectionSurfaceNets(
           const builder = RenderedMaterials.meshers[matIndex];
           if (!builder) continue;
 
-          // Build quad positions (local to section origin)
           for (let q = 0; q < 4; q++) {
             const qi = cellVertIndex(
               lx + quadCells[q][0],
@@ -527,61 +792,91 @@ export function MeshSectionSurfaceNets(
             _qPos[q][1] = _vertY![qi] - cy;
             _qPos[q][2] = _vertZ![qi] - cz;
           }
-          const positions = _qPos;
 
-          // Flip winding when solid is on the +axis side
-          if (!inside0) {
-            const t0 = positions[1][0], t1 = positions[1][1], t2 = positions[1][2];
-            positions[1][0] = positions[3][0]; positions[1][1] = positions[3][1]; positions[1][2] = positions[3][2];
-            positions[3][0] = t0; positions[3][1] = t1; positions[3][2] = t2;
-          }
-
-          emitQuad.setPositions(positions);
-          emitQuad.setUVs(Quad.FullUVs as any);
-          emitQuad.doubleSided = false;
-
-          const dominantFace = closestVoxelFace(emitQuad.normals.vertices[0]);
-
-          builder.origin.x = 0;
-          builder.origin.y = 0;
-          builder.origin.z = 0;
-          builder.position.x = wx;
-          builder.position.y = wy;
-          builder.position.z = wz;
-          builder.nVoxel = worldCursor;
-
-          const solidVoxel = worldCursor.getVoxel(solidX, solidY, solidZ);
-          if (!solidVoxel) continue;
-          builder.voxel = solidVoxel;
-
-          // Reset light/AO before shading so each quad starts clean
-          builder.vars.light.setAll(0);
-          builder.vars.ao.setAll(0);
-
-          // Shade the face (AO + lighting)
-          ShadeSurfaceNetsFace(builder, dominantFace, positions);
-
-          // Resolve texture from the voxel's geometry model (Fix #6)
-          resolveTexture(
-            builder,
-            worldCursor,
-            solidX,
-            solidY,
-            solidZ,
-            dominantFace,
-            emitQuad,
-          );
-
-          builder.startConstruction();
-          addVoxelQuad(builder, emitQuad);
-          builder.updateBounds(emitQuad.bounds);
-          builder.endConstruction();
+          emitSolidQuad(builder, worldCursor, _qPos, inside0, axis, wx, wy, wz, solidX, solidY, solidZ);
         }
       }
     }
   }
 
-  // Phase 3: Collect and compact results
+  // ── Phase 2b: Emit fluid surface quads ───────────────────────────────────
+  //
+  // Fluid quads connect 4 neighboring fluid-vertex cells around each Y-axis
+  // sign change in the fluid field. Uses AXIS_QUADS[1] (Y axis) offsets.
+  // Coastline quads come from the injected top-of-column fluid cap plus real
+  // fluid voxels, both expressed as proper Y-axis transitions in the field.
+  for (let ly = 0; ly < gridY; ly++) {
+    for (let lx = 0; lx < gridX; lx++) {
+      for (let lz = 0; lz < gridZ; lz++) {
+        const d0 = _fluidGrid![densityPointIndex(lx, ly, lz)];
+        const d1 = _fluidGrid![densityPointIndex(lx, ly + 1, lz)];
+
+        // Only emit where fluid transitions from inside → outside going up
+        if (!(d0 >= FLUID_ISO_THRESHOLD) || d1 >= FLUID_ISO_THRESHOLD) continue;
+
+        const wx = cx + lx, wy = cy + ly, wz = cz + lz;
+        const quadCells = AXIS_QUADS[1];
+        let allExist = true;
+        let fluidCornerCount = 0;
+        let avgFluidY = 0;
+        let hasCoastFallback = false;
+
+        for (let q = 0; q < 4; q++) {
+          const qi = cellVertIndex(
+            lx + quadCells[q][0],
+            ly + quadCells[q][1],
+            lz + quadCells[q][2],
+          );
+          if (_fluidVertExists![qi]) {
+            fluidCornerCount++;
+            avgFluidY += _fluidVertY![qi] - cy;
+            continue;
+          }
+          hasCoastFallback = true;
+          if (!_vertExists![qi]) {
+            allExist = false;
+            break;
+          }
+        }
+
+        if (!allExist) continue;
+        if (fluidCornerCount === 0) continue;
+        avgFluidY /= fluidCornerCount;
+
+        // Material: prefer nearby fluid voxel (water) over terrain at injected cells
+        const matIndex = getFluidMaterialNearby(worldCursor, wx, wy, wz);
+        if (matIndex < 0) continue;
+        const builder = RenderedMaterials.meshers[matIndex];
+        if (!builder) continue;
+
+        const [fvx, fvy, fvz] = findNearbyFluidVoxel(worldCursor, wx, wy, wz);
+
+        for (let q = 0; q < 4; q++) {
+          const qlx = lx + quadCells[q][0];
+          const qly = ly + quadCells[q][1];
+          const qlz = lz + quadCells[q][2];
+          const qi = cellVertIndex(qlx, qly, qlz);
+
+          _qPos[q][0] = qlx;
+          _qPos[q][2] = qlz;
+
+          if (_fluidVertExists![qi]) {
+            _qPos[q][1] = hasCoastFallback ? avgFluidY : _fluidVertY![qi] - cy;
+          } else {
+            _qPos[q][1] = avgFluidY;
+          }
+        }
+
+        const t0 = _qPos[1][0], t1 = _qPos[1][1], t2 = _qPos[1][2];
+        _qPos[1][0] = _qPos[3][0]; _qPos[1][1] = _qPos[3][1]; _qPos[1][2] = _qPos[3][2];
+        _qPos[3][0] = t0; _qPos[3][1] = t1; _qPos[3][2] = t2;
+
+        emitFluidQuad(builder, worldCursor, _qPos, wx, wy, wz, fvx, fvy, fvz);
+      }
+    }
+  }
+
+  // ── Phase 3: Collect, cull degenerate micro-meshes, and compact ───────────
   const meshed: VoxelModelBuilder[] = [];
   for (let i = 0; i < RenderedMaterials.meshers.length; i++) {
     const mesher = RenderedMaterials.meshers[i];
@@ -591,6 +886,18 @@ export function MeshSectionSurfaceNets(
       continue;
     }
     const { min, max } = mesher.bvhTool!.getMeshBounds();
+
+    // Cull only genuine zero-volume fragments. Flat slabs and water sheets are
+    // valid visible geometry even when one bound axis is close to zero.
+    const bw = max[0] - min[0], bh = max[1] - min[1], bd = max[2] - min[2];
+    const isDegenerate =
+      mesher.mesh.vertexCount < 4 || (bw < 0.05 && bh < 0.05 && bd < 0.05);
+    if (isDegenerate) {
+      mesher.clear();
+      mesher.bvhTool = null;
+      continue;
+    }
+
     mesher.mesh.minBounds.x = min[0];
     mesher.mesh.minBounds.y = min[1];
     mesher.mesh.minBounds.z = min[2];

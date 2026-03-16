@@ -4,6 +4,7 @@ import { VoxelCursorInterface } from "../../../../Voxels/Cursor/VoxelCursor.inte
 import { CardinalNeighbors3D } from "../../../../Math/CardinalNeighbors";
 import { DimensionSimulation } from "../../../Dimensions/DimensionSimulation";
 import { VoxelFaces } from "../../../../Math";
+import { EngineSettings } from "../../../../Settings/EngineSettings";
 
 const floodOutChecks: Vec3Array[] = [
   [1, 0, 0],
@@ -68,6 +69,7 @@ function determineLiquidLevel(
 VoxelTickUpdateRegister.registerType({
   type: "dve_liquid",
   run(simulation, voxel, update) {
+    if (!EngineSettings.doFlow) return;
     const { x, y, z } = update;
     const liquidUpdateRate = 3;
 

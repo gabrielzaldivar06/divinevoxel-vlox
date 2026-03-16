@@ -112,6 +112,7 @@ export class LiquidGeometryNode extends GeoemtryNode<
     const voxelId = builder.voxel.getVoxelId();
     let added = false;
     let upFaceExposed = false;
+
     if (this.isExposed(VoxelFaces.Up, voxelId)) {
       upFaceExposed = true;
       added = true;
