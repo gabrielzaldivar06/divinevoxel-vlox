@@ -22,22 +22,28 @@ export class VoxelGeometryBuilderCacheSpace {
   fullBlock: Uint8Array;
   //cache of voxel level (0-15 density for surface nets)
   levelCache: Uint8Array;
+  //cache of whether transparent voxel is liquid (vs flora/glass/etc)
+  liquidCache: Uint8Array;
   offset: Vec3Array = [0, 0, 0];
+  outOfBoundsIndex = 0;
 
   voxelCursor = new VoxelCursor();
 
   constructor(public bounds: Vector3Like) {
     const volume = bounds.x * bounds.y * bounds.z;
-    this.foundHash = new Uint8Array(volume);
-    this.voxelCache = new Uint16Array(volume);
-    this.trueVoxelCache = new Uint16Array(volume);
-    this.reltionalVoxelCache = new Uint16Array(volume);
-    this.lightCache = new Int32Array(volume);
-    this.reltionalStateCache = new Uint16Array(volume);
-    this.fullBlock = new Uint8Array(volume);
+    const cacheSize = volume + 1;
+    this.foundHash = new Uint8Array(cacheSize);
+    this.voxelCache = new Uint16Array(cacheSize);
+    this.trueVoxelCache = new Uint16Array(cacheSize);
+    this.reltionalVoxelCache = new Uint16Array(cacheSize);
+    this.lightCache = new Int32Array(cacheSize);
+    this.reltionalStateCache = new Uint16Array(cacheSize);
+    this.fullBlock = new Uint8Array(cacheSize);
 
-    this.noCastAO = new Uint8Array(volume);
-    this.levelCache = new Uint8Array(volume);
+    this.noCastAO = new Uint8Array(cacheSize);
+    this.levelCache = new Uint8Array(cacheSize);
+    this.liquidCache = new Uint8Array(cacheSize);
+    this.outOfBoundsIndex = volume;
   }
   start(x: number, y: number, z: number) {
     this.offset[0] = x;
@@ -54,6 +60,22 @@ export class VoxelGeometryBuilderCacheSpace {
 
     this.noCastAO.fill(0);
     this.levelCache.fill(0);
+    this.liquidCache.fill(0);
+
+    // Any query outside the cache resolves to an air-like sentinel instead of
+    // silently indexing outside the typed arrays.
+    this.foundHash[this.outOfBoundsIndex] = 1;
+  }
+
+  isInBounds(x: number, y: number, z: number) {
+    const lx = x - this.offset[0];
+    const ly = y - this.offset[1];
+    const lz = z - this.offset[2];
+    return (
+      lx >= 0 && lx < this.bounds.x &&
+      ly >= 0 && ly < this.bounds.y &&
+      lz >= 0 && lz < this.bounds.z
+    );
   }
 
   getIndex(x: number, y: number, z: number) {
@@ -68,6 +90,9 @@ export class VoxelGeometryBuilderCacheSpace {
   }
 
   getHash(dataCursor: DataCursorInterface, x: number, y: number, z: number) {
+    if (!this.isInBounds(x, y, z)) {
+      return this.outOfBoundsIndex;
+    }
     const hashed = this.getIndex(x, y, z);
     if (this.foundHash[hashed] == 0) {
       this.hashState(dataCursor, hashed, x, y, z);
@@ -117,6 +142,9 @@ export class VoxelGeometryBuilderCacheSpace {
     this.noCastAO[index] = voxel.isLightSource() || voxel.noAO() ? 1 : 0;
 
     this.voxelCursor.copy(voxel).process();
+
+    //cache liquid flag from substance tags
+    this.liquidCache[index] = this.voxelCursor.substanceTags["dve_is_liquid"] ? 1 : 0;
 
     const relationalBuilder =
       VoxelSchemas.reltionalStateBuilderMap[VoxelLUT.modelsIndex[trueVoxelId]];

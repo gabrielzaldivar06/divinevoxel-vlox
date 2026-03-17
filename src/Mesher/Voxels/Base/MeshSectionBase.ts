@@ -68,9 +68,9 @@ export function MeshSectionBase(
 ): SetSectionMeshTask | null {
   if (!space)
     space = new VoxelGeometryBuilderCacheSpace({
-      x: WorldSpaces.section.bounds.x + padding.x,
-      y: WorldSpaces.section.bounds.y + padding.y,
-      z: WorldSpaces.section.bounds.z + padding.z,
+      x: WorldSpaces.section.bounds.x + padding.x + 1,
+      y: WorldSpaces.section.bounds.y + padding.y + 1,
+      z: WorldSpaces.section.bounds.z + padding.z + 1,
     });
   const { x: cx, y: cy, z: cz } = sectionCursor._sectionPosition;
 

@@ -34,7 +34,6 @@ export class VoxelModelEffect {
       if (!v) continue;
       let start = array.length;
       for (let i = 0; i < v.length; i++) {
-        const point = v[i];
         array[start] = origin.x + point[0];
         array[start + 1] = origin.y + point[1];
         array[start + 2] = origin.z + point[2];
