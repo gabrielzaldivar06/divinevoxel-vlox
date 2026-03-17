@@ -537,6 +537,10 @@ export function MeshSectionSurfaceNets(
 
   ensureBuffers(densitySize, vertSize);
 
+  const isDensityPointInBounds = (lx: number, ly: number, lz: number) => {
+    return lx >= -1 && lx <= gridX && ly >= -1 && ly <= gridY && lz >= -1 && lz <= gridZ;
+  };
+
   // Reset only the used portion of each buffer
   _densityGrid!.fill(0, 0, densitySize);
   _fluidGrid!.fill(0, 0, densitySize);
@@ -561,28 +565,32 @@ export function MeshSectionSurfaceNets(
     }
   }
 
-  // ── Phase 0.5: Inject fluid density for coastal water surface ───────────
-  // Debug path: keep coastal extension simple and tied to real nearby water.
-  // If a terrain column sits next to existing fluid, extend that water up to
-  // sea level so the shoreline remains continuous without complex silhouette
-  // tests against the terrain surface.
+  // ── Phase 0.5: Derive coastal fluid cap from physical occupancy ─────────
+  // Read the physical solid field as truth and derive only a narrow, non-
+  // persistent shoreline cap where real nearby fluid meets columns whose solid
+  // top sits at or just below sea level. This keeps Surface Nets aligned with
+  // the physical world without reintroducing a persistent shoreline shell.
   for (let lx = -1; lx <= gridX; lx++) {
     for (let lz = -1; lz <= gridZ; lz++) {
-      let hasSolid = false;
+      let topSolidLy = -Infinity;
       for (let ly = gridY; ly >= -1; ly--) {
         const di = densityPointIndex(lx, ly, lz);
         if (_densityGrid![di] >= isoThreshold) {
-          hasSolid = true;
+          topSolidLy = ly;
           break;
         }
       }
 
-      if (!hasSolid) continue;
+      if (topSolidLy === -Infinity) continue;
+
+      const topSolidWy = cy + topSolidLy;
+      if (topSolidWy > seaLevel + 1) continue;
 
       let touchesRealFluid = false;
       for (let dx = -2; dx <= 2 && !touchesRealFluid; dx++) {
         for (let dz = -2; dz <= 2 && !touchesRealFluid; dz++) {
-          for (let ly = -1; ly <= gridY; ly++) {
+          for (let ly = topSolidLy - 1; ly <= gridY; ly++) {
+            if (!isDensityPointInBounds(lx + dx, ly, lz + dz)) continue;
             const wy = cy + ly;
             if (wy > seaLevel) continue;
             const di = densityPointIndex(lx + dx, ly, lz + dz);
@@ -596,8 +604,11 @@ export function MeshSectionSurfaceNets(
 
       if (!touchesRealFluid) continue;
 
-      // Fill fluid through seaLevel in shoreline-adjacent columns.
-      for (let ly = -1; ly <= gridY; ly++) {
+      // Derive only a narrow top cap so the shoreline can visually meet the
+      // ocean without turning the whole column into synthetic water.
+      const capStartLy = Math.max(-1, topSolidLy);
+      const capEndLy = Math.min(gridY, topSolidLy + 1, seaLevel - cy);
+      for (let ly = capStartLy; ly <= capEndLy; ly++) {
         const wy = cy + ly;
         if (wy > seaLevel) continue;
         const di = densityPointIndex(lx, ly, lz);
