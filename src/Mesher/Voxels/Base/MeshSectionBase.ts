@@ -14,6 +14,8 @@ import { CompactVoxelSectionMesh } from "./CompactVoxelSectionMesh";
 import { DataCursorInterface } from "../../../Voxels/Cursor/DataCursor.interface";
 import { VoxelLUT } from "../../../Voxels/Data/VoxelLUT";
 import { BuildVoxel } from "./BuildVoxel";
+import { extractWaterState } from "../../../Water/Simulation/WaterStateExtractor";
+import { meshWaterSurface } from "../../../Water/Surface/WaterSurfaceMesher";
 
 let space: VoxelGeometryBuilderCacheSpace;
 const bvhTool = new VoxelMeshBVHBuilder();
@@ -108,6 +110,10 @@ export function MeshSectionBase(
     }
     if (!section.ids[i] || section.getBuried(i)) continue;
     const voxel = sectionCursor.getVoxelAtIndex(i);
+
+    // Skip liquid voxels — handled by dedicated water surface mesher
+    if (voxel.substanceTags["dve_is_liquid"]) continue;
+
     const x = cx + sectionCursor._voxelPosition.x;
     const y = cy + sectionCursor._voxelPosition.y;
     const z = cz + sectionCursor._voxelPosition.z;
@@ -127,6 +133,9 @@ export function MeshSectionBase(
     section.setBuried(i, !addedVoxel);
   }
 
+  // Dedicated water surface meshing (Phase 2)
+  const waterGrid = extractWaterState(worldCursor, sectionCursor);
+  meshWaterSurface(waterGrid);
 
   const meshed: VoxelModelBuilder[] = [];
   for (let i = 0; i < RenderedMaterials.meshers.length; i++) {
@@ -136,13 +145,21 @@ export function MeshSectionBase(
       mesher.bvhTool = null;
       continue;
     }
+
+    // Water builder writes bounds directly to ProtoMesh (no BVH tracking).
+    // Detect this by checking if BVH root bounds are still at reset values.
     const { min, max } = mesher.bvhTool!.getMeshBounds();
-    mesher.mesh.minBounds.x = min[0];
-    mesher.mesh.minBounds.y = min[1];
-    mesher.mesh.minBounds.z = min[2];
-    mesher.mesh.maxBounds.x = max[0];
-    mesher.mesh.maxBounds.y = max[1];
-    mesher.mesh.maxBounds.z = max[2];
+    const bvhValid = isFinite(min[0]) && isFinite(max[0]) && max[0] > min[0];
+
+    if (bvhValid) {
+      mesher.mesh.minBounds.x = min[0];
+      mesher.mesh.minBounds.y = min[1];
+      mesher.mesh.minBounds.z = min[2];
+      mesher.mesh.maxBounds.x = max[0];
+      mesher.mesh.maxBounds.y = max[1];
+      mesher.mesh.maxBounds.z = max[2];
+    }
+    // else: bounds already set by the water surface mesher on the ProtoMesh
 
     meshed.push(mesher);
   }

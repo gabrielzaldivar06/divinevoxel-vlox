@@ -1,0 +1,18 @@
+import { Vec4Array } from "@amodx/math";
+import { VoxelFaces } from "../../../../../Math";
+import { Quad } from "../../../../Geometry/Primitives/Quad";
+import { GeoemtryNode } from "../GeometryNode";
+import { CompiledQuadVoxelGeometryNode, QuadVoxelGometryArgs } from "../Types/QuadVoxelGometryNodeTypes";
+export declare class QuadVoxelGometryNode extends GeoemtryNode<CompiledQuadVoxelGeometryNode, QuadVoxelGometryArgs> {
+    quad: Quad;
+    vertexWeights: [Vec4Array, Vec4Array, Vec4Array, Vec4Array];
+    closestFace: VoxelFaces;
+    trueFaceIndex?: number;
+    init(): void;
+    private shadeFace;
+    private addTransitionQuad;
+    private addConvexCorner;
+    private addConcaveCorner;
+    private addOrganicTransitions;
+    add(args: QuadVoxelGometryArgs): boolean;
+}

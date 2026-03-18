@@ -1,0 +1,21 @@
+import { LocationData } from "../../Math/index.js";
+import { DimensionSegment } from "../Dimensions/DimensionSegment.js";
+import { TaskSegment } from "./TaskSegment.js";
+import { SimulationSector } from "WorldSimulation/Dimensions/SimulationSector.js";
+export type SimulationTaskBaseData = {
+    id: string;
+    sort?: boolean;
+    generationTask?: boolean;
+    checkInRequired?: boolean;
+    log?: boolean;
+    checkDone?(location: LocationData): boolean;
+    run(dimension: DimensionSegment, location: LocationData, taskId: number, task: TaskSegment, sector: SimulationSector): void;
+};
+export declare class SimulationTaskBase {
+    data: SimulationTaskBaseData;
+    constructor(data: SimulationTaskBaseData);
+    getTotal(dimensionId: number): number;
+    getTotalWaitingFor(dimensionId: number): number;
+    add(dimensionId: number, x: number, y: number, z: number): void;
+    runTask(max?: number): void;
+}

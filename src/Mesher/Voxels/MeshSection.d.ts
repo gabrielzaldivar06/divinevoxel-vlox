@@ -1,0 +1,6 @@
+import { LocationData } from "../../Math";
+import type { SetSectionMeshTask } from "../Types/Mesher.types";
+import { SectionCursor } from "../../World/Cursor/SectionCursor.js";
+import { DataCursorInterface } from "../../Voxels/Cursor/DataCursor.interface";
+export declare function MeshSectionWithCursors(worldCursor: DataCursorInterface, sectionCursor: SectionCursor, location: LocationData, transfers?: any[]): SetSectionMeshTask | null;
+export declare function MeshSection(location: LocationData, transfers?: any[]): SetSectionMeshTask | null;

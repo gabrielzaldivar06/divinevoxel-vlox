@@ -1,0 +1,13 @@
+import { VoxelCursorInterface } from "./VoxelCursor.interface";
+import { RawVoxelData } from "../Types/Voxel.types";
+import { PaintVoxelData } from "../Types/PaintVoxelData";
+export declare class VoxelCursor extends VoxelCursorInterface {
+    static VoxelDataToRaw(data: Partial<PaintVoxelData>, light?: number): RawVoxelData;
+    ids: number[];
+    light: number[];
+    level: number[];
+    secondary: number[];
+    radiation: number[];
+    loadIn(): void;
+    updateVoxel(mode: 0 | 1): void;
+}

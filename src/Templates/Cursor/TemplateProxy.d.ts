@@ -1,0 +1,12 @@
+import { IVoxelTemplate } from "../../Templates/VoxelTemplates.types";
+import { NumberArray } from "../../Util/Util.types";
+export declare class TemplateProxy {
+    template: IVoxelTemplate;
+    ids: NumberArray;
+    levels: NumberArray;
+    secondary: NumberArray;
+    light: NumberArray;
+    radiation: NumberArray;
+    constructor(template: IVoxelTemplate);
+    inBounds(x: number, y: number, z: number): boolean;
+}

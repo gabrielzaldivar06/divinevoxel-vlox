@@ -20,6 +20,8 @@ import { ShadeSurfaceNetsFace } from "../Models/Common/Faces/ShadeSurfaceNetsFac
 import { GetTexture } from "../Models/Common/GetTexture";
 import { QuadVoxelGometryInputs } from "../Models/Nodes/Types/QuadVoxelGometryNodeTypes";
 import { BaseVoxelGeometryTextureProcedureData } from "../Models/Procedures/TextureProcedure";
+import { extractWaterState } from "../../../Water/Simulation/WaterStateExtractor";
+import { meshWaterSurface } from "../../../Water/Surface/WaterSurfaceMesher";
 
 
 let space: VoxelGeometryBuilderCacheSpace;
@@ -30,16 +32,6 @@ const ArgIndexes = QuadVoxelGometryInputs.ArgIndexes;
 function getIsoThreshold(): number {
   return EngineSettings.settings.terrain.surfaceNetsIsoLevel / 15;
 }
-
-/**
- * Fluid iso threshold.
- * Water is painted with level=7 → density 7/15 ≈ 0.467.
- * Threshold of 4/15 ≈ 0.267 ensures any voxel with level >= 4 counts as
- * "inside" the fluid volume while still allowing the top fluid cell to
- * terminate cleanly against real air above sea level.
- */
-const FLUID_ISO_THRESHOLD = 4 / 15;
-const FLUID_SURFACE_HEIGHT = 6 / 7;
 
 // 8 corners of a 2x2x2 cube, starting from (0,0,0)
 const CORNER_OFFSETS: [number, number, number][] = [
@@ -78,22 +70,12 @@ const emitQuad = Quad.Create();
 const _qPos: [Vec3Array, Vec3Array, Vec3Array, Vec3Array] = [
   [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
 ];
-const _fluidBottomPos: [Vec3Array, Vec3Array, Vec3Array, Vec3Array] = [
-  [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
-];
-const _fluidClosurePos: [Vec3Array, Vec3Array, Vec3Array, Vec3Array] = [
-  [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
-];
-const _fluidCornerState = new Uint8Array(4);
 // ─── Module-level typed buffers ───────────────────────────────────────────────
 // All reused across calls to avoid GC pressure.
 
 // Terrain solid density field
 let _densityGrid: Float32Array | null = null;
 let _lastDensitySize = 0;
-
-// Fluid density field (separate from terrain — different threshold, different material)
-let _fluidGrid: Float32Array | null = null;
 
 // Terrain surface vertices
 let _vertX: Float32Array | null = null;
@@ -103,20 +85,12 @@ let _vertMat: Int16Array | null = null;
 let _vertExists: Uint8Array | null = null;
 let _lastVertSize = 0;
 
-// Fluid surface vertices (flat layer with wave displacement)
-let _fluidVertX: Float32Array | null = null;
-let _fluidVertY: Float32Array | null = null;
-let _fluidVertZ: Float32Array | null = null;
-let _fluidVertMat: Int16Array | null = null;
-let _fluidVertExists: Uint8Array | null = null;
-
 // Per-cell corner density scratch buffer
 const _cornerDensities = new Float64Array(8);
 
 function ensureBuffers(densitySize: number, vertSize: number) {
   if (densitySize > _lastDensitySize) {
     _densityGrid = new Float32Array(densitySize);
-    _fluidGrid = new Float32Array(densitySize);
     _lastDensitySize = densitySize;
   }
   if (vertSize > _lastVertSize) {
@@ -125,11 +99,6 @@ function ensureBuffers(densitySize: number, vertSize: number) {
     _vertZ = new Float32Array(vertSize);
     _vertMat = new Int16Array(vertSize);
     _vertExists = new Uint8Array(vertSize);
-    _fluidVertX = new Float32Array(vertSize);
-    _fluidVertY = new Float32Array(vertSize);
-    _fluidVertZ = new Float32Array(vertSize);
-    _fluidVertMat = new Int16Array(vertSize);
-    _fluidVertExists = new Uint8Array(vertSize);
     _lastVertSize = vertSize;
   }
 }
@@ -141,8 +110,6 @@ let _dpX = 0, _dpZ = 0; // density point strides
 let _cvX = 0, _cvZ = 0; // cell vertex strides
 let _gridX = 0, _gridY = 0, _gridZ = 0;
 
-const _fluidNeighborSample: Vec3Array = [0, 0, 0];
-
 function densityPointIndex(lx: number, ly: number, lz: number): number {
   return (ly + 1) * _dpX * _dpZ + (lx + 1) * _dpZ + (lz + 1);
 }
@@ -151,236 +118,18 @@ function cellVertIndex(lx: number, ly: number, lz: number): number {
   return (ly + 1) * _cvX * _cvZ + (lx + 1) * _cvZ + (lz + 1);
 }
 
-function isCellVertInBounds(lx: number, ly: number, lz: number): boolean {
-  return lx >= -1 && lx < _gridX && ly >= -1 && ly < _gridY && lz >= -1 && lz < _gridZ;
-}
-
-function sampleNearbyFluidVertex(
-  lx: number,
-  ly: number,
-  lz: number,
-  out: Vec3Array,
-): boolean {
-  let count = 0;
-  let sumX = 0;
-  let sumY = 0;
-  let sumZ = 0;
-
-  for (let dy = 0; dy >= -1; dy--) {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const nx = lx + dx;
-        const ny = ly + dy;
-        const nz = lz + dz;
-        if (!isCellVertInBounds(nx, ny, nz)) continue;
-
-        const ni = cellVertIndex(nx, ny, nz);
-        if (!_fluidVertExists![ni]) continue;
-
-        sumX += _fluidVertX![ni];
-        sumY += _fluidVertY![ni];
-        sumZ += _fluidVertZ![ni];
-        count++;
-      }
-    }
-  }
-
-  if (!count) return false;
-
-  out[0] = sumX / count;
-  out[1] = sumY / count;
-  out[2] = sumZ / count;
-  return true;
-}
-
-function sampleFluidCornerHeight(
-  lx: number,
-  ly: number,
-  lz: number,
-  fallbackY: number,
-): number {
-  let sumY = 0;
-  let count = 0;
-
-  for (let dx = -1; dx <= 0; dx++) {
-    for (let dz = -1; dz <= 0; dz++) {
-      const nx = lx + dx;
-      const ny = ly;
-      const nz = lz + dz;
-      if (!isCellVertInBounds(nx, ny, nz)) continue;
-
-      const ni = cellVertIndex(nx, ny, nz);
-      if (!_fluidVertExists![ni]) continue;
-
-      sumY += _fluidVertY![ni];
-      count++;
-    }
-  }
-
-  if (!count) return fallbackY;
-  return sumY / count;
-}
-
-function resolveFluidCornerPosition(
-  qi: number,
-  qlx: number,
-  qly: number,
-  qlz: number,
-  out: Vec3Array,
-): number {
-  const hasFluidVertex = _fluidVertExists![qi] === 1;
-  const hasTerrainVertex = _vertExists![qi] === 1;
-  const hasFluidNeighbors = sampleNearbyFluidVertex(
-    qlx,
-    qly,
-    qlz,
-    _fluidNeighborSample,
-  );
-
-  if (hasFluidVertex) {
-    out[0] = _fluidVertX![qi];
-    out[1] = sampleFluidCornerHeight(qlx, qly, qlz, _fluidVertY![qi]);
-    out[2] = _fluidVertZ![qi];
-    return 1;
-  }
-
-  if (hasTerrainVertex) {
-    if (hasFluidNeighbors) {
-      out[0] = _vertX![qi];
-      const cornerFluidY = sampleFluidCornerHeight(
-        qlx,
-        qly,
-        qlz,
-        _fluidNeighborSample[1],
-      );
-      out[1] = getCoastalFluidSurfaceY(cornerFluidY, _vertY![qi]);
-      out[2] = _vertZ![qi];
-    } else {
-      out[0] = _vertX![qi];
-      out[1] = _vertY![qi];
-      out[2] = _vertZ![qi];
-    }
-    return hasFluidNeighbors ? 2 : 0;
-  }
-
-  if (hasFluidNeighbors) {
-    out[0] = _fluidNeighborSample[0];
-    out[1] = sampleFluidCornerHeight(qlx, qly, qlz, _fluidNeighborSample[1]);
-    out[2] = _fluidNeighborSample[2];
-    return 2;
-  }
-
-  out[0] = qlx + 0.5;
-  out[1] = qly + FLUID_SURFACE_HEIGHT;
-  out[2] = qlz + 0.5;
-  return 0;
-}
-
-function resolveFluidBottomPosition(
-  qi: number,
-  top: Vec3Array,
-  out: Vec3Array,
-): void {
-  if (_vertExists![qi]) {
-    out[0] = _vertX![qi];
-    out[1] = _vertY![qi];
-    out[2] = _vertZ![qi];
-    return;
-  }
-
-  out[0] = top[0];
-  out[1] = top[1] - 0.3;
-  out[2] = top[2];
-}
-
-function emitFluidClosureQuad(
-  builder: VoxelModelBuilder,
-  worldCursor: DataCursorInterface,
-  positions: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
-  wx: number,
-  wy: number,
-  wz: number,
-  fluidX: number,
-  fluidY: number,
-  fluidZ: number,
-) {
-  emitQuad.setPositions(positions);
-  emitQuad.setUVs(Quad.FullUVs as any);
-  emitQuad.doubleSided = true;
-
-  builder.origin.x = 0;
-  builder.origin.y = 0;
-  builder.origin.z = 0;
-  builder.position.x = wx;
-  builder.position.y = wy;
-  builder.position.z = wz;
-  builder.nVoxel = worldCursor;
-
-  const fluidVoxel = worldCursor.getVoxel(fluidX, fluidY, fluidZ);
-  if (!fluidVoxel) return;
-  builder.voxel = fluidVoxel;
-
-  builder.vars.light.setAll(15);
-  builder.vars.ao.setAll(0);
-  // Force the closure strip to inherit top-water shading/texture so it doesn't
-  // read like a separate colored wall when visible near shore.
-  ShadeSurfaceNetsFace(builder, VoxelFaces.Up, positions);
-  resolveTexture(builder, worldCursor, fluidX, fluidY, fluidZ, VoxelFaces.Up, emitQuad);
-
-  builder.startConstruction();
-  addVoxelQuad(builder, emitQuad);
-  builder.updateBounds(emitQuad.bounds);
-  builder.endConstruction();
-}
-
-function getCoastalFluidSurfaceY(surfaceY: number, terrainY: number): number {
-  const terrainDelta = terrainY - surfaceY;
-  if (terrainDelta <= -0.35) return surfaceY;
-
-  const coastalBlend = Math.max(0, Math.min(1, (terrainDelta + 0.35) / 0.85));
-  const raisedSurface = Math.min(surfaceY + 0.45, terrainY + 0.06);
-  return surfaceY * (1 - coastalBlend) + raisedSurface * coastalBlend;
-}
-
-function getFluidSurfaceHeightFromVoxel(
+/**
+ * Terrain solid density — reads opaque voxels only (foundHash == 2).
+ * Transparent and liquid voxels return 0 so they don't affect the terrain surface.
+ */
+function getSolidDensity(
   nVoxel: DataCursorInterface,
   x: number,
   y: number,
   z: number,
-  fallbackY: number,
 ): number {
-  const voxel = nVoxel.getVoxel(x, y, z);
-  if (!voxel || !voxel.isRenderable() || !voxel.substanceTags["dve_is_liquid"]) {
-    return fallbackY;
-  }
-
-  const level = voxel.getLevel();
-  const levelState = voxel.getLevelState();
-  if (levelState === 1 && level < 7) {
-    return y + (1 - level / 7) * FLUID_SURFACE_HEIGHT;
-  }
-
-  return y + FLUID_SURFACE_HEIGHT;
-}
-
-/**
- * Terrain solid density — reads opaque voxels only (foundHash == 2).
- * Transparent/fluid voxels return 0 so they don't affect the terrain surface.
- */
-function getSolidDensity(nVoxel: DataCursorInterface, x: number, y: number, z: number): number {
   const hashed = space.getHash(nVoxel, x, y, z);
   if (space.foundHash[hashed] !== 2) return 0;
-  return space.levelCache[hashed] / 15;
-}
-
-/**
- * Fluid density — reads liquid transparent voxels only (foundHash == 3 AND
- * liquidCache == 1).  Non-liquid transparents like grass, leaves, glass are
- * excluded so they don't inject phantom fluid into the density field.
- */
-function getFluidDensity(nVoxel: DataCursorInterface, x: number, y: number, z: number): number {
-  const hashed = space.getHash(nVoxel, x, y, z);
-  if (space.foundHash[hashed] !== 3 || !space.liquidCache[hashed]) return 0;
   return space.levelCache[hashed] / 15;
 }
 
@@ -396,52 +145,6 @@ function getMaterialIndex(
   const hashed = space.getHash(nVoxel, x, y, z);
   if (space.foundHash[hashed] !== 2) return -1;
   return VoxelLUT.materialMap[space.trueVoxelCache[hashed]];
-}
-
-/**
- * Get the material index for a fluid voxel (foundHash == 3) at the given
- * position, or search the 6 face-neighbors for the nearest fluid voxel.
- * Used for fluid quads at injected terrain cells where the cell itself
- * is solid but the water surface extends over it.
- */
-function getFluidMaterialNearby(
-  nVoxel: DataCursorInterface,
-  x: number, y: number, z: number,
-): number {
-  // Direct lookup
-  let h = space.getHash(nVoxel, x, y, z);
-  if (space.foundHash[h] === 3 && space.liquidCache[h]) return VoxelLUT.materialMap[space.trueVoxelCache[h]];
-  // Búsqueda extendida hacia el interior de la isla (para garantizar que el quad se emite)
-  for (let dy = 0; dy >= -1; dy--) {
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        h = space.getHash(nVoxel, x + dx, y + dy, z + dz);
-        if (space.foundHash[h] === 3 && space.liquidCache[h]) return VoxelLUT.materialMap[space.trueVoxelCache[h]];
-      }
-    }
-  }
-  return -1;
-}
-
-/**
- * Find the world position of the nearest fluid voxel (foundHash == 3)
- * for texture/shader lookup on coast-transition quads.
- */
-function findNearbyFluidVoxel(
-  nVoxel: DataCursorInterface,
-  x: number, y: number, z: number,
-): [number, number, number] {
-  let h = space.getHash(nVoxel, x, y, z);
-  if (space.foundHash[h] === 3 && space.liquidCache[h]) return [x, y, z];
-  for (let dy = 0; dy >= -1; dy--) {
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        h = space.getHash(nVoxel, x + dx, y + dy, z + dz);
-        if (space.foundHash[h] === 3 && space.liquidCache[h]) return [x + dx, y + dy, z + dz];
-      }
-    }
-  }
-  return [x, y, z];
 }
 
 /**
@@ -666,44 +369,6 @@ function emitSolidQuad(
   builder.endConstruction();
 }
 
-/**
- * Emit a fluid surface quad (Y-axis only — water top face).
- *
- * Fluid quads are always horizontal (VoxelFaces.Up). AO is skipped —
- * the PBR liquid shader handles its own shading.
- */
-function emitFluidQuad(
-  builder: VoxelModelBuilder,
-  worldCursor: DataCursorInterface,
-  positions: [Vec3Array, Vec3Array, Vec3Array, Vec3Array],
-  wx: number, wy: number, wz: number,
-  fluidX: number, fluidY: number, fluidZ: number,
-) {
-  emitQuad.setPositions(positions);
-  emitQuad.setUVs(Quad.FullUVs as any);
-  emitQuad.doubleSided = false;
-
-  const dominantFace = closestVoxelFace(emitQuad.normals.vertices[0]);
-
-  builder.origin.x = 0; builder.origin.y = 0; builder.origin.z = 0;
-  builder.position.x = wx; builder.position.y = wy; builder.position.z = wz;
-  builder.nVoxel = worldCursor;
-
-  const fluidVoxel = worldCursor.getVoxel(fluidX, fluidY, fluidZ);
-  if (!fluidVoxel) return;
-  builder.voxel = fluidVoxel;
-
-  builder.vars.light.setAll(15);
-  builder.vars.ao.setAll(0);
-  ShadeSurfaceNetsFace(builder, dominantFace, positions);
-  resolveTexture(builder, worldCursor, fluidX, fluidY, fluidZ, dominantFace, emitQuad);
-
-  builder.startConstruction();
-  addVoxelQuad(builder, emitQuad);
-  builder.updateBounds(emitQuad.bounds);
-  builder.endConstruction();
-}
-
 // ─── Main mesher ──────────────────────────────────────────────────────────────
 
 export function MeshSectionSurfaceNets(
@@ -774,92 +439,28 @@ export function MeshSectionSurfaceNets(
 
   // Reset only the used portion of each buffer
   _densityGrid!.fill(0, 0, densitySize);
-  _fluidGrid!.fill(0, 0, densitySize);
   _vertExists!.fill(0, 0, vertSize);
   _vertMat!.fill(-1, 0, vertSize);
-  _fluidVertExists!.fill(0, 0, vertSize);
-  _fluidVertMat!.fill(-1, 0, vertSize);
 
   const seaLevel = (EngineSettings.settings.terrain as any).seaLevel ?? 32;
 
-  // ── Phase 0: Pre-compute both density grids ──────────────────────────────
-  // Terrain solid and fluid are sampled separately so their fields don't
-  // interfere. A single world position contributes to at most one field.
+  // ── Phase 0: Pre-compute terrain density grid ─────────────────────────────
+  // Fluid grid is no longer computed here — water is handled by the
+  // dedicated WaterSurfaceMesher (Phase 2 architecture redesign).
   for (let ly = -1; ly <= gridY; ly++) {
     for (let lx = -1; lx <= gridX; lx++) {
       for (let lz = -1; lz <= gridZ; lz++) {
         const wx = cx + lx, wy = cy + ly, wz = cz + lz;
         const di = densityPointIndex(lx, ly, lz);
         _densityGrid![di] = getSolidDensity(worldCursor, wx, wy, wz);
-        _fluidGrid![di] = getFluidDensity(worldCursor, wx, wy, wz);
       }
     }
   }
 
-  // ── Phase 0.5: Derive coastal fluid cap from physical occupancy ─────────
-  // Read the physical solid field as truth and derive only a narrow, non-
-  // persistent shoreline cap where real nearby fluid meets columns whose solid
-  // top sits at or just below sea level. This keeps Surface Nets aligned with
-  // the physical world without reintroducing a persistent shoreline shell.
-  for (let lx = -1; lx <= gridX; lx++) {
-    for (let lz = -1; lz <= gridZ; lz++) {
-      let topSolidLy = -Infinity;
-      for (let ly = gridY; ly >= -1; ly--) {
-        const di = densityPointIndex(lx, ly, lz);
-        if (_densityGrid![di] >= isoThreshold) {
-          topSolidLy = ly;
-          break;
-        }
-      }
-
-      if (topSolidLy === -Infinity) continue;
-
-      const topSolidWy = cy + topSolidLy;
-      if (topSolidWy > seaLevel + 1) continue;
-
-      let touchesRealFluid = false;
-      for (let dx = -2; dx <= 2 && !touchesRealFluid; dx++) {
-        for (let dz = -2; dz <= 2 && !touchesRealFluid; dz++) {
-          for (let ly = topSolidLy - 1; ly <= gridY; ly++) {
-            const nx = lx + dx, nz = lz + dz;
-            const wy = cy + ly;
-            if (wy > seaLevel) continue;
-            // Use pre-computed grid when in bounds; otherwise query the
-            // cache space directly (padding extends ±4 beyond the section)
-            // so sector-boundary columns can still find neighbouring fluid.
-            if (isDensityPointInBounds(nx, ly, nz)) {
-              const di = densityPointIndex(nx, ly, nz);
-              if (_fluidGrid![di] >= FLUID_ISO_THRESHOLD) {
-                touchesRealFluid = true;
-                break;
-              }
-            } else {
-              const fd = getFluidDensity(worldCursor, cx + nx, wy, cz + nz);
-              if (fd >= FLUID_ISO_THRESHOLD) {
-                touchesRealFluid = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (!touchesRealFluid) continue;
-
-      // Derive only a narrow top cap so the shoreline can visually meet the
-      // ocean without turning the whole column into synthetic water.
-      const capStartLy = Math.max(-1, topSolidLy);
-      const capEndLy = Math.min(gridY, topSolidLy + 1, seaLevel - cy);
-      for (let ly = capStartLy; ly <= capEndLy; ly++) {
-        const wy = cy + ly;
-        if (wy > seaLevel) continue;
-        const di = densityPointIndex(lx, ly, lz);
-        if (_fluidGrid![di] < FLUID_ISO_THRESHOLD) {
-          _fluidGrid![di] = 1;
-        }
-      }
-    }
-  }
+  // ── Phase 0.5: DISABLED — coastal fluid cap no longer needed ─────────────
+  // Water surface is now generated by the dedicated WaterSurfaceMesher.
+  // The old coastal cap injection code has been removed as part of the
+  // water architecture redesign (Phase 2).
 
   // --- Phase 1: Compute surface vertices for each cell ---
   // Cells span lx ∈ [-1, gridX-1] (padded grid, Fix #4+#8).
@@ -940,64 +541,8 @@ export function MeshSectionSurfaceNets(
     }
   }
 
-  // ── Phase 1b: Compute fluid surface vertices ─────────────────────────────
-  //
-  // Fluid vertices are only placed for Y-axis sign changes (horizontal surface).
-  // The Y position includes wave displacement for natural undulation.
-  // Vertical/lateral fluid faces are intentionally omitted — the underwater
-  // interior is never visible.
-  for (let ly = -1; ly < gridY; ly++) {
-    for (let lx = -1; lx < gridX; lx++) {
-      for (let lz = -1; lz < gridZ; lz++) {
-        const dBot = _fluidGrid![densityPointIndex(lx, ly, lz)];
-        const dTop = _fluidGrid![densityPointIndex(lx, ly + 1, lz)];
-
-        const botInside = dBot >= FLUID_ISO_THRESHOLD;
-        const topInside = dTop >= FLUID_ISO_THRESHOLD;
-
-        // We want the top surface: fluid below, air/terrain above
-        if (!botInside || topInside) continue;
-
-        // Interpolate against real air above the water column. Without the
-        // old synthetic shell, this keeps the surface inside the current cell
-        // and aligned with the actual fluid density field.
-        const t = Math.max(
-          0,
-          Math.min(1, (FLUID_ISO_THRESHOLD - dBot) / (dTop - dBot)),
-        );
-        const surfaceY = getFluidSurfaceHeightFromVoxel(
-          worldCursor,
-          cx + lx,
-          cy + ly,
-          cz + lz,
-          cy + ly + t,
-        );
-
-        const wx = cx + lx, wz = cz + lz;
-        const idx = cellVertIndex(lx, ly, lz);
-
-        // Keep the water mesh itself stable. Animated motion belongs in the
-        // shader so coast contact and depth interactions do not drift.
-        // Use the terrain vertex X/Z when available so the shoreline follows
-        // the same interpolated coast contour; otherwise place the fluid
-        // vertex at the center of the cell.
-        if (_vertExists![idx]) {
-          _fluidVertX![idx] = _vertX![idx];
-          _fluidVertZ![idx] = _vertZ![idx];
-          _fluidVertY![idx] = getCoastalFluidSurfaceY(surfaceY, _vertY![idx]);
-        } else {
-          _fluidVertX![idx] = wx + 0.5;
-          _fluidVertZ![idx] = wz + 0.5;
-          _fluidVertY![idx] = surfaceY;
-        }
-        _fluidVertExists![idx] = 1;
-
-        // Material: prefer nearby fluid voxel (water) over terrain
-        const mat = getFluidMaterialNearby(worldCursor, wx, cy + ly, wz);
-        _fluidVertMat![idx] = mat;
-      }
-    }
-  }
+  // ── Phase 1b: DISABLED — fluid surface vertices no longer computed ──────
+  // Water surface is now generated by the dedicated WaterSurfaceMesher.
 
   // ── Phase 2a: Emit terrain quads ─────────────────────────────────────────
   for (let ly = 0; ly < gridY; ly++) {
@@ -1083,111 +628,12 @@ export function MeshSectionSurfaceNets(
     }
   }
 
-  // ── Phase 2b: Emit fluid surface quads ───────────────────────────────────
-  //
-  // Fluid quads connect 4 neighboring fluid-vertex cells around each Y-axis
-  // sign change in the fluid field. Uses AXIS_QUADS[1] (Y axis) offsets.
-  // Coastline quads come from the injected top-of-column fluid cap plus real
-  // fluid voxels, both expressed as proper Y-axis transitions in the field.
-  for (let ly = 0; ly < gridY; ly++) {
-    for (let lx = 0; lx < gridX; lx++) {
-      for (let lz = 0; lz < gridZ; lz++) {
-        const d0 = _fluidGrid![densityPointIndex(lx, ly, lz)];
-        const d1 = _fluidGrid![densityPointIndex(lx, ly + 1, lz)];
+  // ── Phase 2b: DISABLED — fluid quads no longer emitted by Surface Nets ──
+  // Water surface is now generated by the dedicated WaterSurfaceMesher.
 
-        // Only emit where fluid transitions from inside → outside going up
-        if (!(d0 >= FLUID_ISO_THRESHOLD) || d1 >= FLUID_ISO_THRESHOLD) continue;
-
-        const wx = cx + lx, wy = cy + ly, wz = cz + lz;
-        const quadCells = AXIS_QUADS[1];
-        let allExist = true;
-        let fluidCornerCount = 0;
-
-        for (let q = 0; q < 4; q++) {
-          const qi = cellVertIndex(
-            lx + quadCells[q][0],
-            ly + quadCells[q][1],
-            lz + quadCells[q][2],
-          );
-          if (_fluidVertExists![qi]) {
-            fluidCornerCount++;
-            continue;
-          }
-          if (!_vertExists![qi]) {
-            allExist = false;
-            break;
-          }
-        }
-
-        if (!allExist) continue;
-        if (fluidCornerCount === 0) continue;
-
-        // Material: prefer nearby fluid voxel (water) over terrain at injected cells
-        const matIndex = getFluidMaterialNearby(worldCursor, wx, wy, wz);
-        if (matIndex < 0) continue;
-        const builder = RenderedMaterials.meshers[matIndex];
-        if (!builder) continue;
-
-        const [fvx, fvy, fvz] = findNearbyFluidVoxel(worldCursor, wx, wy, wz);
-
-        for (let q = 0; q < 4; q++) {
-          const qlx = lx + quadCells[q][0];
-          const qly = ly + quadCells[q][1];
-          const qlz = lz + quadCells[q][2];
-          const qi = cellVertIndex(qlx, qly, qlz);
-
-          _fluidCornerState[q] = resolveFluidCornerPosition(qi, qlx, qly, qlz, _qPos[q]);
-          resolveFluidBottomPosition(qi, _qPos[q], _fluidBottomPos[q]);
-          _qPos[q][0] -= cx;
-          _qPos[q][1] -= cy;
-          _qPos[q][2] -= cz;
-          _fluidBottomPos[q][0] -= cx;
-          _fluidBottomPos[q][1] -= cy;
-          _fluidBottomPos[q][2] -= cz;
-        }
-
-        const t0 = _qPos[1][0], t1 = _qPos[1][1], t2 = _qPos[1][2];
-        _qPos[1][0] = _qPos[3][0]; _qPos[1][1] = _qPos[3][1]; _qPos[1][2] = _qPos[3][2];
-        _qPos[3][0] = t0; _qPos[3][1] = t1; _qPos[3][2] = t2;
-
-        const b0 = _fluidBottomPos[1][0], b1 = _fluidBottomPos[1][1], b2 = _fluidBottomPos[1][2];
-        _fluidBottomPos[1][0] = _fluidBottomPos[3][0]; _fluidBottomPos[1][1] = _fluidBottomPos[3][1]; _fluidBottomPos[1][2] = _fluidBottomPos[3][2];
-        _fluidBottomPos[3][0] = b0; _fluidBottomPos[3][1] = b1; _fluidBottomPos[3][2] = b2;
-
-        const s = _fluidCornerState[1];
-        _fluidCornerState[1] = _fluidCornerState[3];
-        _fluidCornerState[3] = s;
-
-        emitFluidQuad(builder, worldCursor, _qPos, wx, wy, wz, fvx, fvy, fvz);
-
-        for (let edge = 0; edge < 4; edge++) {
-          const next = (edge + 1) % 4;
-          const needsClosure =
-            _fluidCornerState[edge] !== 1 || _fluidCornerState[next] !== 1;
-          if (!needsClosure) continue;
-
-          const topDropA = _qPos[edge][1] - _fluidBottomPos[edge][1];
-          const topDropB = _qPos[next][1] - _fluidBottomPos[next][1];
-          if (topDropA < 0.02 && topDropB < 0.02) continue;
-
-          _fluidClosurePos[0][0] = _qPos[edge][0];
-          _fluidClosurePos[0][1] = _qPos[edge][1];
-          _fluidClosurePos[0][2] = _qPos[edge][2];
-          _fluidClosurePos[1][0] = _qPos[next][0];
-          _fluidClosurePos[1][1] = _qPos[next][1];
-          _fluidClosurePos[1][2] = _qPos[next][2];
-          _fluidClosurePos[2][0] = _fluidBottomPos[next][0];
-          _fluidClosurePos[2][1] = _fluidBottomPos[next][1];
-          _fluidClosurePos[2][2] = _fluidBottomPos[next][2];
-          _fluidClosurePos[3][0] = _fluidBottomPos[edge][0];
-          _fluidClosurePos[3][1] = _fluidBottomPos[edge][1];
-          _fluidClosurePos[3][2] = _fluidBottomPos[edge][2];
-
-          emitFluidClosureQuad(builder, worldCursor, _fluidClosurePos, wx, wy, wz, fvx, fvy, fvz);
-        }
-      }
-    }
-  }
+  // ── Phase 2.5: Dedicated water surface meshing ────────────────────────────
+  const waterGrid = extractWaterState(worldCursor, sectionCursor);
+  meshWaterSurface(waterGrid);
 
   // ── Phase 3: Collect, cull degenerate micro-meshes, and compact ───────────
   const meshed: VoxelModelBuilder[] = [];
@@ -1198,25 +644,31 @@ export function MeshSectionSurfaceNets(
       mesher.bvhTool = null;
       continue;
     }
+
+    // Water builder writes bounds directly to ProtoMesh (no BVH tracking).
+    // Detect this by checking if BVH root bounds are still at reset values.
     const { min, max } = mesher.bvhTool!.getMeshBounds();
+    const bvhValid = isFinite(min[0]) && isFinite(max[0]) && max[0] > min[0];
 
-    // Cull only genuine zero-volume fragments. Flat slabs and water sheets are
-    // valid visible geometry even when one bound axis is close to zero.
-    const bw = max[0] - min[0], bh = max[1] - min[1], bd = max[2] - min[2];
-    const isDegenerate =
-      mesher.mesh.vertexCount < 4 || (bw < 0.05 && bh < 0.05 && bd < 0.05);
-    if (isDegenerate) {
-      mesher.clear();
-      mesher.bvhTool = null;
-      continue;
+    if (bvhValid) {
+      // Cull only genuine zero-volume fragments.
+      const bw = max[0] - min[0], bh = max[1] - min[1], bd = max[2] - min[2];
+      const isDegenerate =
+        mesher.mesh.vertexCount < 4 || (bw < 0.05 && bh < 0.05 && bd < 0.05);
+      if (isDegenerate) {
+        mesher.clear();
+        mesher.bvhTool = null;
+        continue;
+      }
+      mesher.mesh.minBounds.x = min[0];
+      mesher.mesh.minBounds.y = min[1];
+      mesher.mesh.minBounds.z = min[2];
+      mesher.mesh.maxBounds.x = max[0];
+      mesher.mesh.maxBounds.y = max[1];
+      mesher.mesh.maxBounds.z = max[2];
     }
+    // else: bounds already set by the water surface mesher on the ProtoMesh
 
-    mesher.mesh.minBounds.x = min[0];
-    mesher.mesh.minBounds.y = min[1];
-    mesher.mesh.minBounds.z = min[2];
-    mesher.mesh.maxBounds.x = max[0];
-    mesher.mesh.maxBounds.y = max[1];
-    mesher.mesh.maxBounds.z = max[2];
     meshed.push(mesher);
   }
 
