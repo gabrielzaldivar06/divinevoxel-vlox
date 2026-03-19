@@ -14,6 +14,7 @@ const FLOW_SOURCE_BIAS = 0.18;
 const FLOW_STRENGTH_SCALE = 1.4;
 const SEA_OPEN_NEIGHBOR_THRESHOLD = 20;
 const RIVER_FLOW_THRESHOLD = 0.3;
+const WATER_PADDED_RADIUS = 2;
 const CARDINAL_FLOW_NEIGHBORS: [number, number][] = [
   [1, 0],
   [-1, 0],
@@ -56,6 +57,7 @@ const _grid: WaterSectionGrid = {
   boundsZ: 0,
   columns: [],
   paddedColumns: [],
+  paddedRadius: WATER_PADDED_RADIUS,
   paddedBoundsX: 0,
   paddedBoundsZ: 0,
   filledCount: 0,
@@ -131,10 +133,16 @@ function getPaddedColumn(
   lx: number,
   lz: number,
 ): WaterColumnSample | undefined {
-  if (lx < -1 || lx > grid.boundsX || lz < -1 || lz > grid.boundsZ) {
+  const radius = grid.paddedRadius;
+  if (
+    lx < -radius ||
+    lx > grid.boundsX + radius - 1 ||
+    lz < -radius ||
+    lz > grid.boundsZ + radius - 1
+  ) {
     return undefined;
   }
-  return grid.paddedColumns[(lx + 1) * grid.paddedBoundsZ + (lz + 1)];
+  return grid.paddedColumns[(lx + radius) * grid.paddedBoundsZ + (lz + radius)];
 }
 
 function getWaterClass(
@@ -225,7 +233,9 @@ function computeFlowMetadata(grid: WaterSectionGrid) {
   for (let lx = 0; lx < bx; lx++) {
     for (let lz = 0; lz < bz; lz++) {
       copyColumnSample(
-        grid.paddedColumns[(lx + 1) * grid.paddedBoundsZ + (lz + 1)],
+        grid.paddedColumns[
+          (lx + grid.paddedRadius) * grid.paddedBoundsZ + (lz + grid.paddedRadius)
+        ],
         grid.columns[lx * bz + lz],
       );
     }
@@ -304,8 +314,8 @@ export function extractWaterState(
   const bz = bounds.z;
   const by = bounds.y;
   const totalCols = bx * bz;
-  const paddedBoundsX = bx + 2;
-  const paddedBoundsZ = bz + 2;
+  const paddedBoundsX = bx + WATER_PADDED_RADIUS * 2;
+  const paddedBoundsZ = bz + WATER_PADDED_RADIUS * 2;
   const paddedCount = paddedBoundsX * paddedBoundsZ;
   const minSurfaceY = options?.minSurfaceY;
   const maxSurfaceY = options?.maxSurfaceY;
@@ -321,6 +331,7 @@ export function extractWaterState(
   _grid.boundsZ = bz;
   _grid.columns = _columns;
   _grid.paddedColumns = _paddedColumns;
+  _grid.paddedRadius = WATER_PADDED_RADIUS;
   _grid.paddedBoundsX = paddedBoundsX;
   _grid.paddedBoundsZ = paddedBoundsZ;
   _grid.filledCount = 0;
@@ -347,9 +358,11 @@ export function extractWaterState(
     }
   }
 
-  for (let px = -1; px <= bx; px++) {
-    for (let pz = -1; pz <= bz; pz++) {
-      const paddedIndex = (px + 1) * paddedBoundsZ + (pz + 1);
+  for (let px = -WATER_PADDED_RADIUS; px <= bx + WATER_PADDED_RADIUS - 1; px++) {
+    for (let pz = -WATER_PADDED_RADIUS; pz <= bz + WATER_PADDED_RADIUS - 1; pz++) {
+      const paddedIndex =
+        (px + WATER_PADDED_RADIUS) * paddedBoundsZ +
+        (pz + WATER_PADDED_RADIUS);
       const paddedCol = _paddedColumns[paddedIndex];
 
       if (px >= 0 && px < bx && pz >= 0 && pz < bz) {

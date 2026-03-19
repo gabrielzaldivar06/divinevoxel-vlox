@@ -47,11 +47,13 @@ export interface WaterSectionGrid {
   boundsZ: number;
   /** Flat array of column samples, length = boundsX * boundsZ. */
   columns: WaterColumnSample[];
-  /** One-column padded sample ring for immediate cross-section lookups. */
+  /** Padded sample ring for cross-section lookups. */
   paddedColumns: WaterColumnSample[];
-  /** Padded X dimension, typically boundsX + 2. */
+  /** Number of padded columns available around the section. */
+  paddedRadius: number;
+  /** Padded X dimension, typically boundsX + paddedRadius * 2. */
   paddedBoundsX: number;
-  /** Padded Z dimension, typically boundsZ + 2. */
+  /** Padded Z dimension, typically boundsZ + paddedRadius * 2. */
   paddedBoundsZ: number;
   /** Number of columns that have water (filled === true). */
   filledCount: number;

@@ -10,8 +10,16 @@ export type WaterSurfaceMesherOptions = {
   maxSurfaceY?: number;
 };
 
+type WaterVertexContext = {
+  fillFactor: number;
+  shoreDistance: number;
+  openEdgeFactor: number;
+};
+
+type WaterPoint = [number, number, number];
+
 const VERTEX_SIZE = VoxelMeshVertexConstants.VertexFloatSize;
-const WATER_SEAM_EPSILON = 0.0001;
+const WATER_SEAM_EPSILON = 0.001;
 
 function encodeWaterClassValue(waterClass: WaterColumnSample["waterClass"]) {
   if (waterClass === "river") return 0;
@@ -98,6 +106,7 @@ function writeWaterVertex(
   flowZ: number,
   flowStrength: number,
   waterClassValue: number,
+  stableSurfaceHeight: number,
 ) {
   const i = localIndex * VERTEX_SIZE;
   const shoreFactor = computeShoreFactor(shoreDistance);
@@ -154,8 +163,10 @@ function writeWaterVertex(
   array[i + VoxelMeshVertexConstants.MetadataOffset + 2] = flowStrength;
   array[i + VoxelMeshVertexConstants.MetadataOffset + 3] = waterClassValue;
 
-  // SubdivAO (offset 26): 0.5 = neutral
-  array[i + 26] = 0.5;
+  // Stable water surface context.
+  // Top-surface quads store a constant world-space surface Y.
+  // Vertical seam quads store -1 to disable underside shading.
+  array[i + 26] = stableSurfaceHeight;
   // PhNormalized (offset 27): shoreline distance normalized [0,1]
   //   0 = coast-adjacent water
   //   1 = offshore / no nearby shore within the encoded radius
@@ -201,8 +212,16 @@ function getFilledColumn(
     return col.filled ? col : null;
   }
 
-  if (lx < -1 || lx > grid.boundsX || lz < -1 || lz > grid.boundsZ) return null;
-  const paddedIndex = (lx + 1) * grid.paddedBoundsZ + (lz + 1);
+  const radius = grid.paddedRadius;
+  if (
+    lx < -radius ||
+    lx > grid.boundsX + radius - 1 ||
+    lz < -radius ||
+    lz > grid.boundsZ + radius - 1
+  ) {
+    return null;
+  }
+  const paddedIndex = (lx + radius) * grid.paddedBoundsZ + (lz + radius);
   const col = grid.paddedColumns[paddedIndex];
   return col.filled ? col : null;
 }
@@ -228,6 +247,78 @@ function sampleCornerLocalSurfaceY(
     count++;
   }
   return count ? total / count : fallbackY;
+}
+
+function sampleCornerColumnAverage(
+  grid: WaterSectionGrid,
+  vertexX: number,
+  vertexZ: number,
+  fallbackValue: number,
+  sample: (col: WaterColumnSample, lx: number, lz: number) => number,
+) {
+  let total = 0;
+  let count = 0;
+  const cells: [number, number][] = [
+    [vertexX - 1, vertexZ - 1],
+    [vertexX - 1, vertexZ],
+    [vertexX, vertexZ - 1],
+    [vertexX, vertexZ],
+  ];
+  for (const [cx, cz] of cells) {
+    const col = getFilledColumn(grid, cx, cz);
+    if (!col) continue;
+    total += sample(col, cx, cz);
+    count++;
+  }
+  return count ? total / count : fallbackValue;
+}
+
+function createWaterVertexContext(
+  grid: WaterSectionGrid,
+  vertexX: number,
+  vertexZ: number,
+  fillFactor: number,
+  shoreDistance: number,
+  openEdgeFactor: number,
+): WaterVertexContext {
+  const shoreFallback = shoreDistance >= 0 ? shoreDistance : 8;
+  return {
+    fillFactor: sampleCornerColumnAverage(
+      grid,
+      vertexX,
+      vertexZ,
+      fillFactor,
+      (col) => Math.max(0, Math.min(1, col.fill)),
+    ),
+    shoreDistance: sampleCornerColumnAverage(
+      grid,
+      vertexX,
+      vertexZ,
+      shoreFallback,
+      (col) => (col.shoreDistance >= 0 ? col.shoreDistance : 8),
+    ),
+    openEdgeFactor: sampleCornerColumnAverage(
+      grid,
+      vertexX,
+      vertexZ,
+      openEdgeFactor,
+      (_col, lx, lz) => computeOpenEdgeFactor(grid, lx, lz),
+    ),
+  };
+}
+
+function computeHeightfieldWaterNormal(
+  grid: WaterSectionGrid,
+  vertexX: number,
+  vertexZ: number,
+  fallbackY: number,
+): WaterPoint {
+  const centerY = sampleCornerLocalSurfaceY(grid, vertexX, vertexZ, fallbackY);
+  const leftY = sampleCornerLocalSurfaceY(grid, vertexX - 1, vertexZ, centerY);
+  const rightY = sampleCornerLocalSurfaceY(grid, vertexX + 1, vertexZ, centerY);
+  const northY = sampleCornerLocalSurfaceY(grid, vertexX, vertexZ - 1, centerY);
+  const southY = sampleCornerLocalSurfaceY(grid, vertexX, vertexZ + 1, centerY);
+  return normalizeWaterNormal(leftY - rightY, 2, northY - southY);
 }
 
 function getColumnBaseLocalY(col: WaterColumnSample) {
@@ -263,6 +354,17 @@ function emitVisibleWaterSeams(
 ) {
   const baseY = getColumnBaseLocalY(col);
   const seamOpenEdgeFactor = Math.max(openEdgeFactor, 0.5);
+  const seamContext: WaterVertexContext = {
+    fillFactor,
+    shoreDistance: shoreDist,
+    openEdgeFactor: seamOpenEdgeFactor,
+  };
+  const seamContexts: [WaterVertexContext, WaterVertexContext, WaterVertexContext, WaterVertexContext] = [
+    seamContext,
+    seamContext,
+    seamContext,
+    seamContext,
+  ];
 
   const eastX = lx + 1;
   if (!getFilledColumn(grid, lx + 1, lz)) {
@@ -272,18 +374,17 @@ function emitVisibleWaterSeams(
       emitWaterQuad(
         mesh,
         waterTexture,
-        fillFactor,
         heightNorm,
-        shoreDist,
-        seamOpenEdgeFactor,
         flowX,
         flowZ,
         flowStrength,
         waterClassValue,
+        seamContexts,
         topSE,
         topNE,
         bottomNE,
         bottomSE,
+        -1,
       );
     }
   }
@@ -296,18 +397,17 @@ function emitVisibleWaterSeams(
       emitWaterQuad(
         mesh,
         waterTexture,
-        fillFactor,
         heightNorm,
-        shoreDist,
-        seamOpenEdgeFactor,
         flowX,
         flowZ,
         flowStrength,
         waterClassValue,
+        seamContexts,
         topNW,
         topSW,
         bottomSW,
         bottomNW,
+        -1,
       );
     }
   }
@@ -320,18 +420,17 @@ function emitVisibleWaterSeams(
       emitWaterQuad(
         mesh,
         waterTexture,
-        fillFactor,
         heightNorm,
-        shoreDist,
-        seamOpenEdgeFactor,
         flowX,
         flowZ,
         flowStrength,
         waterClassValue,
+        seamContexts,
         topNE,
         topNW,
         bottomNW,
         bottomNE,
+        -1,
       );
     }
   }
@@ -344,60 +443,100 @@ function emitVisibleWaterSeams(
       emitWaterQuad(
         mesh,
         waterTexture,
-        fillFactor,
         heightNorm,
-        shoreDist,
-        seamOpenEdgeFactor,
         flowX,
         flowZ,
         flowStrength,
         waterClassValue,
+        seamContexts,
         topSW,
         topSE,
         bottomSE,
         bottomSW,
+        -1,
       );
     }
   }
 }
 
+function normalizeWaterNormal(nx: number, ny: number, nz: number): WaterPoint {
+  const length = Math.hypot(nx, ny, nz);
+  if (length > 0.0001) {
+    return [nx / length, ny / length, nz / length];
+  }
+  return [0, 1, 0];
+}
+
+function computeTriangleNormal(origin: WaterPoint, pointA: WaterPoint, pointB: WaterPoint): WaterPoint {
+  const ux = pointA[0] - origin[0];
+  const uy = pointA[1] - origin[1];
+  const uz = pointA[2] - origin[2];
+  const vx = pointB[0] - origin[0];
+  const vy = pointB[1] - origin[1];
+  const vz = pointB[2] - origin[2];
+  return normalizeWaterNormal(
+    uy * vz - uz * vy,
+    uz * vx - ux * vz,
+    ux * vy - uy * vx,
+  );
+}
+
+function blendWaterNormals(normalA: WaterPoint, normalB: WaterPoint): WaterPoint {
+  return normalizeWaterNormal(
+    normalA[0] + normalB[0],
+    normalA[1] + normalB[1],
+    normalA[2] + normalB[2],
+  );
+}
+
+function alignWaterNormal(normal: WaterPoint, reference: WaterPoint): WaterPoint {
+  const dot =
+    normal[0] * reference[0] +
+    normal[1] * reference[1] +
+    normal[2] * reference[2];
+  if (dot < 0) {
+    return [-normal[0], -normal[1], -normal[2]];
+  }
+  return normal;
+}
+
 function emitWaterQuad(
   mesh: any,
   waterTexture: number,
-  fillFactor: number,
   heightNorm: number,
-  shoreDist: number,
-  openEdgeFactor: number,
   flowX: number,
   flowZ: number,
   flowStrength: number,
   waterClassValue: number,
-  p0: [number, number, number],
-  p1: [number, number, number],
-  p2: [number, number, number],
-  p3: [number, number, number],
+  vertexContexts: [WaterVertexContext, WaterVertexContext, WaterVertexContext, WaterVertexContext],
+  p0: WaterPoint,
+  p1: WaterPoint,
+  p2: WaterPoint,
+  p3: WaterPoint,
+  stableSurfaceHeight: number,
+  vertexNormals?: [WaterPoint, WaterPoint, WaterPoint, WaterPoint],
 ) {
-  const ux = p1[0] - p0[0];
-  const uy = p1[1] - p0[1];
-  const uz = p1[2] - p0[2];
-  const vx = p2[0] - p0[0];
-  const vy = p2[1] - p0[1];
-  const vz = p2[2] - p0[2];
-
-  let nx = uy * vz - uz * vy;
-  let ny = uz * vx - ux * vz;
-  let nz = ux * vy - uy * vx;
-  const normalLength = Math.hypot(nx, ny, nz);
-  if (normalLength > 0.0001) {
-    nx /= normalLength;
-    ny /= normalLength;
-    nz /= normalLength;
-  } else {
-    nx = 0;
-    ny = 1;
-    nz = 0;
-  }
-  const slope = Math.max(0, Math.min(1, 1 - Math.abs(ny)));
+  const triA = computeTriangleNormal(p0, p1, p2);
+  const triB = computeTriangleNormal(p0, p2, p3);
+  const faceNormal = blendWaterNormals(triA, triB);
+  const computedNormals: [WaterPoint, WaterPoint, WaterPoint, WaterPoint] = [
+    alignWaterNormal(computeTriangleNormal(p0, p1, p3), faceNormal),
+    alignWaterNormal(computeTriangleNormal(p1, p2, p0), faceNormal),
+    alignWaterNormal(computeTriangleNormal(p2, p3, p1), faceNormal),
+    alignWaterNormal(computeTriangleNormal(p3, p0, p2), faceNormal),
+  ];
+  const normals = vertexNormals
+    ? (vertexNormals.map((normal) => alignWaterNormal(normal, faceNormal)) as [
+        WaterPoint,
+        WaterPoint,
+        WaterPoint,
+        WaterPoint,
+      ])
+    : computedNormals;
+  const slopes = normals.map((normal) =>
+    Math.max(0, Math.min(1, 1 - Math.abs(normal[1]))),
+  ) as [number, number, number, number];
+  const usePrimaryDiagonal = Math.abs(p0[1] - p2[1]) <= Math.abs(p1[1] - p3[1]);
 
   const baseVert = mesh.vertexCount;
 
@@ -406,10 +545,16 @@ function emitWaterQuad(
     mesh.buffer.currentArray,
     mesh.buffer.curentIndex,
     p0[0], p0[1], p0[2],
-    nx, ny, nz,
+    normals[0][0], normals[0][1], normals[0][2],
     1, 0,
-    waterTexture, _voxelData[0], fillFactor, heightNorm, shoreDist, openEdgeFactor, slope,
-    flowX, flowZ, flowStrength, waterClassValue,
+    waterTexture,
+    _voxelData[0],
+    vertexContexts[0].fillFactor,
+    heightNorm,
+    vertexContexts[0].shoreDistance,
+    vertexContexts[0].openEdgeFactor,
+    slopes[0],
+    flowX, flowZ, flowStrength, waterClassValue, stableSurfaceHeight,
   );
 
   mesh.buffer.setIndex(baseVert + 1);
@@ -417,10 +562,16 @@ function emitWaterQuad(
     mesh.buffer.currentArray,
     mesh.buffer.curentIndex,
     p1[0], p1[1], p1[2],
-    nx, ny, nz,
+    normals[1][0], normals[1][1], normals[1][2],
     0, 0,
-    waterTexture, _voxelData[1], fillFactor, heightNorm, shoreDist, openEdgeFactor, slope,
-    flowX, flowZ, flowStrength, waterClassValue,
+    waterTexture,
+    _voxelData[1],
+    vertexContexts[1].fillFactor,
+    heightNorm,
+    vertexContexts[1].shoreDistance,
+    vertexContexts[1].openEdgeFactor,
+    slopes[1],
+    flowX, flowZ, flowStrength, waterClassValue, stableSurfaceHeight,
   );
 
   mesh.buffer.setIndex(baseVert + 2);
@@ -428,10 +579,16 @@ function emitWaterQuad(
     mesh.buffer.currentArray,
     mesh.buffer.curentIndex,
     p2[0], p2[1], p2[2],
-    nx, ny, nz,
+    normals[2][0], normals[2][1], normals[2][2],
     0, 1,
-    waterTexture, _voxelData[2], fillFactor, heightNorm, shoreDist, openEdgeFactor, slope,
-    flowX, flowZ, flowStrength, waterClassValue,
+    waterTexture,
+    _voxelData[2],
+    vertexContexts[2].fillFactor,
+    heightNorm,
+    vertexContexts[2].shoreDistance,
+    vertexContexts[2].openEdgeFactor,
+    slopes[2],
+    flowX, flowZ, flowStrength, waterClassValue, stableSurfaceHeight,
   );
 
   mesh.buffer.setIndex(baseVert + 3);
@@ -439,30 +596,38 @@ function emitWaterQuad(
     mesh.buffer.currentArray,
     mesh.buffer.curentIndex,
     p3[0], p3[1], p3[2],
-    nx, ny, nz,
+    normals[3][0], normals[3][1], normals[3][2],
     1, 1,
-    waterTexture, _voxelData[3], fillFactor, heightNorm, shoreDist, openEdgeFactor, slope,
-    flowX, flowZ, flowStrength, waterClassValue,
+    waterTexture,
+    _voxelData[3],
+    vertexContexts[3].fillFactor,
+    heightNorm,
+    vertexContexts[3].shoreDistance,
+    vertexContexts[3].openEdgeFactor,
+    slopes[3],
+    flowX, flowZ, flowStrength, waterClassValue, stableSurfaceHeight,
   );
 
   const indBase = mesh.indicieCount;
   const indices = mesh.indices;
 
-  indices.setIndex(indBase).currentArray[indices.curentIndex] = baseVert;
-  indices.setIndex(indBase + 1).currentArray[indices.curentIndex] = baseVert + 1;
-  indices.setIndex(indBase + 2).currentArray[indices.curentIndex] = baseVert + 2;
-  indices.setIndex(indBase + 3).currentArray[indices.curentIndex] = baseVert + 2;
-  indices.setIndex(indBase + 4).currentArray[indices.curentIndex] = baseVert + 3;
-  indices.setIndex(indBase + 5).currentArray[indices.curentIndex] = baseVert;
+  if (usePrimaryDiagonal) {
+    indices.setIndex(indBase).currentArray[indices.curentIndex] = baseVert;
+    indices.setIndex(indBase + 1).currentArray[indices.curentIndex] = baseVert + 1;
+    indices.setIndex(indBase + 2).currentArray[indices.curentIndex] = baseVert + 2;
+    indices.setIndex(indBase + 3).currentArray[indices.curentIndex] = baseVert + 2;
+    indices.setIndex(indBase + 4).currentArray[indices.curentIndex] = baseVert + 3;
+    indices.setIndex(indBase + 5).currentArray[indices.curentIndex] = baseVert;
+  } else {
+    indices.setIndex(indBase).currentArray[indices.curentIndex] = baseVert;
+    indices.setIndex(indBase + 1).currentArray[indices.curentIndex] = baseVert + 1;
+    indices.setIndex(indBase + 2).currentArray[indices.curentIndex] = baseVert + 3;
+    indices.setIndex(indBase + 3).currentArray[indices.curentIndex] = baseVert + 1;
+    indices.setIndex(indBase + 4).currentArray[indices.curentIndex] = baseVert + 2;
+    indices.setIndex(indBase + 5).currentArray[indices.curentIndex] = baseVert + 3;
+  }
 
-  indices.setIndex(indBase + 6).currentArray[indices.curentIndex] = baseVert;
-  indices.setIndex(indBase + 7).currentArray[indices.curentIndex] = baseVert + 3;
-  indices.setIndex(indBase + 8).currentArray[indices.curentIndex] = baseVert + 2;
-  indices.setIndex(indBase + 9).currentArray[indices.curentIndex] = baseVert + 2;
-  indices.setIndex(indBase + 10).currentArray[indices.curentIndex] = baseVert + 1;
-  indices.setIndex(indBase + 11).currentArray[indices.curentIndex] = baseVert;
-
-  mesh.addVerticies(4, 12);
+  mesh.addVerticies(4, 6);
 
   const minX = Math.min(p0[0], p1[0], p2[0], p3[0]);
   const minY = Math.min(p0[1], p1[1], p2[1], p3[1]);
@@ -552,22 +717,34 @@ export function meshWaterSurface(
       const topNW: [number, number, number] = [lx, y00, lz];
       const topSW: [number, number, number] = [lx, y01, lz + 1];
       const topSE: [number, number, number] = [lx + 1, y11, lz + 1];
+      const topNormals: [WaterPoint, WaterPoint, WaterPoint, WaterPoint] = [
+        computeHeightfieldWaterNormal(grid, lx + 1, lz, y10),
+        computeHeightfieldWaterNormal(grid, lx, lz, y00),
+        computeHeightfieldWaterNormal(grid, lx, lz + 1, y01),
+        computeHeightfieldWaterNormal(grid, lx + 1, lz + 1, y11),
+      ];
+      const vertexContexts: [WaterVertexContext, WaterVertexContext, WaterVertexContext, WaterVertexContext] = [
+        createWaterVertexContext(grid, lx + 1, lz, fillFactor, shoreDist, openEdgeFactor),
+        createWaterVertexContext(grid, lx, lz, fillFactor, shoreDist, openEdgeFactor),
+        createWaterVertexContext(grid, lx, lz + 1, fillFactor, shoreDist, openEdgeFactor),
+        createWaterVertexContext(grid, lx + 1, lz + 1, fillFactor, shoreDist, openEdgeFactor),
+      ];
 
       emitWaterQuad(
         mesh,
         waterTexture,
-        fillFactor,
         heightNorm,
-        shoreDist,
-        openEdgeFactor,
         flowX,
         flowZ,
         flowStrength,
         waterClassValue,
+        vertexContexts,
         topNE,
         topNW,
         topSW,
         topSE,
+        worldSurfaceY,
+        topNormals,
       );
       emitVisibleWaterSeams(
         mesh,
