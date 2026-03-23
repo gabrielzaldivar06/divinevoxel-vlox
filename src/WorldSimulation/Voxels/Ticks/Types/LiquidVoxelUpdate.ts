@@ -154,7 +154,7 @@ VoxelTickUpdateRegister.registerType({
     }
 
     if (currentLevel < finalLevel) {
-      voxel.setLevel(currentLevel + 1);
+      voxel.setLevel(finalLevel);
       voxel.updateVoxel(0);
       simulation.scheduleUpdate("dve_liquid", x, y, z, liquidUpdateRate);
       simulation.bounds.updateDisplay(x, y, z);
@@ -190,16 +190,18 @@ VoxelTickUpdateRegister.registerType({
       if (addToTick) {
         simulation.bounds.updateDisplay(x, y - 1, z);
         simulation.scheduleUpdate("dve_liquid", x, y - 1, z, liquidUpdateRate);
+        // Re-acquire source cursor — brush.paint() moved the shared cursor via onPaint callback
+        const sourceVoxel = simulation.getVoxelForUpdate(x, y, z);
         // Drain source after donating downward — finite volume conservation
         const srcLevel = currentLevel - 1;
-        voxel.setLevel(srcLevel);
-        voxel.setLevelState(0);
-        voxel.updateVoxel(0);
+        sourceVoxel.setLevel(srcLevel);
+        sourceVoxel.setLevelState(0);
+        sourceVoxel.updateVoxel(0);
         simulation.bounds.updateDisplay(x, y, z);
         simulation.scheduleUpdate("dve_liquid", x, y, z, liquidUpdateRate);
+        return;
       }
-
-      return;
+      // isSame below but nothing to do — fall through to horizontal spread
     }
 
     for (let i = 0; i < 4; i++) {
@@ -215,7 +217,7 @@ VoxelTickUpdateRegister.registerType({
         simulation.brush
           .setId(voxel.getStringId())
           .setXYZ(nx, ny, nz)
-          .setLevel(vLevel + 1)
+          .setLevel(currentLevel - 1)
           .setLevelState(0)
           .paint();
         simulation.bounds.updateDisplay(nx, ny, nz);
