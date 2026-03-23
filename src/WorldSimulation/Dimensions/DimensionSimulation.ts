@@ -8,6 +8,7 @@ import { VoxelTickUpdate } from "../Voxels/Ticks/VoxelTickUpdate";
 import { PriorityQueue } from "../../Util/PriorityQueue";
 import { VoxelUpdate } from "../Voxels/Behaviors";
 import { SimulationBrush } from "../Tools/SimulationBrush";
+import { recordHydrologyLiquidSchedule } from "../Hydrology/HydrologyDebugMetrics";
 const NegativeInfinityVec3 = Vector3Like.Create(
   -Infinity,
   -Infinity,
@@ -128,6 +129,9 @@ export class DimensionSimulation {
     delay: number,
     data = null
   ) {
+    if (type === "dve_liquid") {
+      recordHydrologyLiquidSchedule();
+    }
     const active = this.dimension.activeSectors.get(x, y, z);
     if (!active)
       throw new Error(

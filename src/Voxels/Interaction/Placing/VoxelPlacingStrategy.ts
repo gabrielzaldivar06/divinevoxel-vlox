@@ -32,6 +32,7 @@ export class VoxelModelPlacingStrategy {
     if (!stragetegies) return null;
     let match = true;
     for (const strat of stragetegies) {
+      match = true;
       if (alt !== null) {
         if (strat.alt == undefined) {
           match = false;

@@ -6,6 +6,7 @@ import { Vec3Array } from "@amodx/math";
 import { SunRemove, SunUpdate } from "../Illumanation/SunUpdate";
 import { RGBRemove, RGBUpdate } from "../Illumanation/RGBUpdate";
 import { WorldVoxelCursor } from "../../../World/Cursor/WorldVoxelCursor";
+import { recordHydrologyWorldFlowActivation } from "../../../WorldSimulation/Hydrology/HydrologyDebugMetrics";
 const flowUpdateChecks: Vec3Array[] = [
   [0, -1, 0],
   [1, 0, 0],
@@ -153,6 +154,7 @@ export function WorldFlow(task: VoxelUpdateTask) {
                 z + flowUpdateChecks[i][2]
               );
               if (nVoxel && nVoxel.isAir()) {
+                recordHydrologyWorldFlowActivation();
                 queue.push(x, y, z);
                 Flood(task, voxel);
                 break;

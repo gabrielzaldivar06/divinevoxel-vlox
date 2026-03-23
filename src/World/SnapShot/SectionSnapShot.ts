@@ -113,7 +113,15 @@ export class SectionSnapShot {
           }
 
           used[i] = true;
-          snapShotSection.set(sector.getSection(wx, wy, wz).view);
+          const sectionView = sector.getSection(wx, wy, wz).view;
+          // Guard: source sector buffer may be detached when using non-shared
+          // memory (ArrayBuffer gets neutered after worker transfer).
+          if (sectionView.buffer.byteLength === 0) {
+            snapShotSection.fill(0);
+            used[i] = false;
+            continue;
+          }
+          snapShotSection.set(sectionView);
         }
       }
     }

@@ -57,6 +57,13 @@ export type VoxelSpaceUpdateData =
       }
     >
   | VoxelSpaceBaseUpdateData<
+      "replace-voxel-template",
+      {
+        position: Vec3Array;
+        template: IVoxelTemplateData<any>;
+      }
+    >
+  | VoxelSpaceBaseUpdateData<
       "erase-voxel-selection",
       {
         selection: IVoxelSelectionData<any>;
@@ -147,8 +154,8 @@ export class VoxelBuildSpace {
     }
     return await this.pick(
       provider.origin,
-      this.rayProvider.direction,
-      this.rayProvider.length,
+      provider.direction,
+      provider.length,
     );
   }
 
@@ -186,11 +193,11 @@ export class VoxelBuildSpace {
 
   async getExtrudedSelectionTemplate(
     selection: IVoxelSelectionData<any>,
-    nomral: Vector3Like,
+    normal: Vector3Like,
   ) {
     const templateData = await this.DVER.threads.world.runTaskAsync(
       "get-extruded-voxel-selection-template",
-      [selection, nomral],
+      [selection, normal],
     );
     return new FullVoxelTemplate(templateData);
   }
@@ -210,6 +217,7 @@ export class VoxelBuildSpace {
 
     const schema = VoxelSchemas.getStateSchema(data.id)!;
     data.state = schema.readString(state);
+    return data;
   }
 
   async clear() {
@@ -260,6 +268,12 @@ export class VoxelBuildSpace {
     },
     "erase-voxel-template": async (update) => {
       await this.DVER.threads.world.runTaskAsync("erase-voxel-template", [
+        [0, ...update.position],
+        update.template,
+      ]);
+    },
+    "replace-voxel-template": async (update) => {
+      await this.DVER.threads.world.runTaskAsync("replace-voxel-template", [
         [0, ...update.position],
         update.template,
       ]);
@@ -341,6 +355,19 @@ export class VoxelBuildSpace {
   ) {
     await this.update({
       type: "erase-voxel-template",
+      position: Array.isArray(position)
+        ? position
+        : Vector3Like.ToArray(position),
+      template,
+    });
+  }
+
+  async replaceTemplate(
+    position: Vec3Array | Vector3Like,
+    template: IVoxelTemplateData<any>,
+  ) {
+    await this.update({
+      type: "replace-voxel-template",
       position: Array.isArray(position)
         ? position
         : Vector3Like.ToArray(position),

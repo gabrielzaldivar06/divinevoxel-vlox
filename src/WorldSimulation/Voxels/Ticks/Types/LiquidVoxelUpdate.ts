@@ -5,6 +5,7 @@ import { CardinalNeighbors3D } from "../../../../Math/CardinalNeighbors";
 import { DimensionSimulation } from "../../../Dimensions/DimensionSimulation";
 import { VoxelFaces } from "../../../../Math";
 import { EngineSettings } from "../../../../Settings/EngineSettings";
+import { recordHydrologyLiquidRun } from "../../../Hydrology/HydrologyDebugMetrics";
 
 const floodOutChecks: Vec3Array[] = [
   [1, 0, 0],
@@ -70,17 +71,25 @@ VoxelTickUpdateRegister.registerType({
   type: "dve_liquid",
   run(simulation, voxel, update) {
     if (!EngineSettings.doFlow) return;
+    recordHydrologyLiquidRun();
     const { x, y, z } = update;
     const liquidUpdateRate = 3;
 
     const currentLevel = voxel.getLevel();
     const levelState = voxel.getLevelState();
     if (levelState == 1 && currentLevel < 7) {
-      voxel.setLevel(7);
+      // Only auto-fill if there's a same liquid source directly above (waterfall column)
+      const upVoxel = simulation.nDataCursor.getVoxel(x, y + 1, z);
+      if (upVoxel && upVoxel.isSameVoxel(voxel)) {
+        voxel.setLevel(7);
+        voxel.updateVoxel(0);
+        simulation.scheduleUpdate("dve_liquid", x, y, z, liquidUpdateRate);
+        simulation.bounds.updateDisplay(x, y, z);
+        return;
+      }
+      // No source above — convert to still water, let normal drain logic handle it
+      voxel.setLevelState(0);
       voxel.updateVoxel(0);
-      simulation.scheduleUpdate("dve_liquid", x, y, z, liquidUpdateRate);
-      simulation.bounds.updateDisplay(x, y, z);
-      return;
     }
     if (levelState == 2) {
       voxel.setLevelState(0);
@@ -181,6 +190,13 @@ VoxelTickUpdateRegister.registerType({
       if (addToTick) {
         simulation.bounds.updateDisplay(x, y - 1, z);
         simulation.scheduleUpdate("dve_liquid", x, y - 1, z, liquidUpdateRate);
+        // Drain source after donating downward — finite volume conservation
+        const srcLevel = currentLevel - 1;
+        voxel.setLevel(srcLevel);
+        voxel.setLevelState(0);
+        voxel.updateVoxel(0);
+        simulation.bounds.updateDisplay(x, y, z);
+        simulation.scheduleUpdate("dve_liquid", x, y, z, liquidUpdateRate);
       }
 
       return;
@@ -200,7 +216,7 @@ VoxelTickUpdateRegister.registerType({
           .setId(voxel.getStringId())
           .setXYZ(nx, ny, nz)
           .setLevel(vLevel + 1)
-          .setLevelState(1)
+          .setLevelState(0)
           .paint();
         simulation.bounds.updateDisplay(nx, ny, nz);
         if (currentLevel - 1 > 0) {

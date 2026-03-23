@@ -1,10 +1,12 @@
 import { VoxelUpdateData } from "../../Tasks.types";
 import { VoxelUpdateTask } from "../../VoxelUpdateTask";
-import { canUpdate, updateArea } from "../Common";
+import { canUpdate, updateArea, updatePowerTask } from "../Common";
 import { PaintVoxelData } from "../../../Voxels/Types/PaintVoxelData";
 import { VoxelPath } from "../../../Templates/Path/VoxelPath";
 import { Vec3Array, Vector3Like } from "@amodx/math";
 import { VoxelPathData } from "../../../Templates/Path/VoxelPath.types";
+import { EngineSettings as ES } from "../../../Settings/EngineSettings";
+import { PowerUpdate } from "../../Propagation/Power/PowerUpdate";
 
 const tasks = new VoxelUpdateTask();
 const min = Vector3Like.Create();
@@ -27,10 +29,12 @@ export default function PaintVoxelPath(
 ) {
   tasks.setOriginAt([dimension, ox, oy, oz]);
   const path = new VoxelPath(voxelPathData);
+  let needsPowerUpdate = false;
 
   for (let i = 0; i < path.segments.length; i++) {
     const { start, end, voxel } = path.segments[i];
     const rawVoxel = PaintVoxelData.ToRaw(voxel);
+    let wroteVoxel = false;
     min.x = Infinity;
     min.y = Infinity;
     min.z = Infinity;
@@ -52,6 +56,12 @@ export default function PaintVoxelPath(
       voxel.setLight(0);
       voxel.setRaw(rawVoxel);
       voxel.updateVoxel(0);
+      if (ES.doPower && voxel.doesVoxelAffectLogic()) {
+        tasks.setOriginAt([dimension, sx, sy, sz]);
+        updatePowerTask(tasks);
+        tasks.power.update.push(sx, sy, sz);
+        needsPowerUpdate = true;
+      }
       updateArea(tasks, sx, sy, sz, sx, sy, sz);
       continue;
     }
@@ -78,9 +88,23 @@ export default function PaintVoxelPath(
       voxel.setLight(0);
       voxel.setRaw(rawVoxel);
       voxel.updateVoxel(0);
+      if (ES.doPower && voxel.doesVoxelAffectLogic()) {
+        tasks.setOriginAt([dimension, vx, vy, vz]);
+        updatePowerTask(tasks);
+        tasks.power.update.push(vx, vy, vz);
+        needsPowerUpdate = true;
+      }
+      wroteVoxel = true;
       updateBounds(vx, vy, vz);
     }
 
-    updateArea(tasks, min.x, min.y, min.z, max.x, max.y, max.z);
+    if (wroteVoxel) {
+      updateArea(tasks, min.x, min.y, min.z, max.x, max.y, max.z);
+    }
+  }
+
+  tasks.setOriginAt([dimension, ox, oy, oz]);
+  if (needsPowerUpdate) {
+    PowerUpdate(tasks);
   }
 }

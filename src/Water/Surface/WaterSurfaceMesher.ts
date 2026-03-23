@@ -32,18 +32,23 @@ function encodeWaterClassValue(waterClass: WaterColumnSample["waterClass"]) {
  * Falls back to 0 if not found.
  */
 function resolveWaterTexture(voxelId: number): number {
-  const stateIndex = VoxelLUT.getStateIndex(
-    voxelId,
-    0,
-    VoxelLUT.totalRelationalVoxelIds
-  );
-  const geoInputIdx = VoxelLUT.geometryInputsIndex[stateIndex];
-  if (geoInputIdx === undefined) return 0;
-  const nodeInputs = GeometryLUT.geometryInputs[geoInputIdx];
-  if (!nodeInputs || !nodeInputs[0]) return 0;
-  const args = nodeInputs[0];
-  if (typeof args.stillTexture === "number") return args.stillTexture;
-  if (typeof args.texture === "number") return args.texture;
+  const geometryInputStateIndex = VoxelLUT.getGeometryInputIndex(voxelId, 0);
+  const geometryInputPaletteIds =
+    GeometryLUT.geometryInputsIndex[geometryInputStateIndex];
+  if (!geometryInputPaletteIds?.length) return 0;
+
+  for (const geometryInputPaletteId of geometryInputPaletteIds) {
+    const nodeInputs = GeometryLUT.geometryInputs[geometryInputPaletteId];
+    if (!nodeInputs) continue;
+
+    for (const args of nodeInputs) {
+      if (!args) continue;
+      if (typeof args.stillTexture === "number") return args.stillTexture;
+      if (typeof args.texture === "number") return args.texture;
+      if (Array.isArray(args) && typeof args[1] === "number") return args[1];
+    }
+  }
+
   return 0;
 }
 

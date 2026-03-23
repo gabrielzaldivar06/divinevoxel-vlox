@@ -47,7 +47,6 @@ export default async function LockSectors(
   for (const _ of waitingToLockSectors) {
     proms.push(_.waitTillCheckedIn() as any);
   }
-
   await Promise.all(proms);
 
   for (const sector of waitingToLockSectors) {

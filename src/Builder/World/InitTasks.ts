@@ -21,6 +21,7 @@ import { BoundsMinMaxData } from "@amodx/math/Geometry/Bounds/BoundsInterface";
 import { FullVoxelTemplateData } from "../../Templates/Full/FullVoxelTemplate.types";
 import { IVoxelSelectionData } from "../../Templates/Selection/VoxelSelection";
 import { ExtrudeSelection } from "../../Templates/Functions/ExtrudeSelection";
+import ReplaceVoxelTemplate from "../../Tasks/Paint/Paint/ReplaceVoxelTemplate";
 
 export function InitTasks() {
   const dimension = WorldSimulation.getDimension(0);
@@ -38,9 +39,10 @@ export function InitTasks() {
   Threads.registerTask<[min: Vector3Like, max: Vector3Like], any>(
     "get-box-area-template",
     async ([min, max]) => {
-      await LockSectors(cursor.dimension, buildAreaBounds);
+      const areaBounds = new BoundingBox(min, max);
+      await LockSectors(cursor.dimension, areaBounds);
       const archived = CreateFullTemplate(cursor, { min, max });
-      await UnLockSectors(cursor.dimension, buildAreaBounds);
+      await UnLockSectors(cursor.dimension, areaBounds);
       return [archived];
     }
   );
@@ -83,7 +85,11 @@ export function InitTasks() {
   >(
     "get-voxel-surface-selection",
     async ([position, normal, extrusion, maxSize]) => {
-      await LockSectors(cursor.dimension, buildAreaBounds);
+      const selBounds = new BoundingBox(
+        Vector3Like.Create(position.x, position.y, position.z),
+        Vector3Like.Create(position.x, position.y, position.z)
+      );
+      await LockSectors(cursor.dimension, selBounds);
       surfaceSelection.reConstruct(
         cursor,
         position,
@@ -91,7 +97,7 @@ export function InitTasks() {
         extrusion,
         maxSize
       );
-      await UnLockSectors(cursor.dimension, buildAreaBounds);
+      await UnLockSectors(cursor.dimension, selBounds);
       return [surfaceSelection.toJSON()];
     }
   );
@@ -111,9 +117,13 @@ export function InitTasks() {
   Threads.registerTask<[position: Vector3Like, maxSize?: number]>(
     "get-voxel-bfs-selection",
     async ([position, maxSize]) => {
-      await LockSectors(cursor.dimension, buildAreaBounds);
+      const bfsBounds = new BoundingBox(
+        Vector3Like.Create(position.x, position.y, position.z),
+        Vector3Like.Create(position.x, position.y, position.z)
+      );
+      await LockSectors(cursor.dimension, bfsBounds);
       bfsSelection.reConstruct(cursor, position, maxSize);
-      await UnLockSectors(cursor.dimension, buildAreaBounds);
+      await UnLockSectors(cursor.dimension, bfsBounds);
       return [bfsSelection.toJSON()];
     }
   );
@@ -124,20 +134,31 @@ export function InitTasks() {
   Threads.registerTask<[LocationData, RawVoxelData]>(
     "paint-voxel",
     async ([location, raw]) => {
-      await LockSectors(location[0], buildAreaBounds);
+      const voxelBounds = new BoundingBox(
+        Vector3Like.Create(location[1], location[2], location[3]),
+        Vector3Like.Create(location[1], location[2], location[3])
+      );
+      await LockSectors(location[0], voxelBounds);
       brush.setXYZ(location[1], location[2], location[3]);
       brush.setRaw(raw);
       brush.paint(updateData);
-      await UnLockSectors(location[0], buildAreaBounds);
+      await UnLockSectors(location[0], voxelBounds);
     }
   );
 
-  Threads.registerTask<LocationData>("erase-voxel", async (location) => {
-    await LockSectors(location[0], buildAreaBounds);
+  Threads.registerTask<LocationData, number>("erase-voxel", async (location) => {
+    const voxelBounds = new BoundingBox(
+      Vector3Like.Create(location[1], location[2], location[3]),
+      Vector3Like.Create(location[1], location[2], location[3])
+    );
+    await LockSectors(location[0], voxelBounds);
+    cursor.setFocalPoint(location[0], location[1], location[2], location[3]);
+    const erasedVoxelId = cursor.getVoxel(location[1], location[2], location[3])?.getVoxelId() || 0;
     brush.dimension = location[0];
     brush.setXYZ(location[1], location[2], location[3]);
     brush.erase(updateData);
-    await UnLockSectors(location[0], buildAreaBounds);
+    await UnLockSectors(location[0], voxelBounds);
+    return [erasedVoxelId];
   });
 
   Threads.registerTask<
@@ -146,7 +167,7 @@ export function InitTasks() {
   >("create-voxel-template", async ([location, bounds]) => {
     const boundingBox = new BoundingBox(bounds.min, bounds.max);
     await LockSectors(location[0], boundingBox);
-    const template = CreateFullTemplate(cursor, bounds);
+    const template = CreateFullTemplate(cursor, bounds, true);
     await UnLockSectors(location[0], boundingBox);
     return [template];
   });
@@ -160,6 +181,22 @@ export function InitTasks() {
       brush
         .setXYZ(location[1], location[2], location[3])
         .paintTemplate(template, updateData);
+      await UnLockSectors(location[0], template.bounds);
+    }
+  );
+
+  Threads.registerTask<[location: LocationData, data: IVoxelTemplateData<any>]>(
+    "replace-voxel-template",
+    async ([location, data]) => {
+      const template = VoxelTemplateRegister.create(data);
+      brush.dimension = location[0];
+      await LockSectors(location[0], template.bounds);
+      ReplaceVoxelTemplate(
+        location[0],
+        [location[1], location[2], location[3]],
+        data,
+        updateData
+      );
       await UnLockSectors(location[0], template.bounds);
     }
   );
@@ -191,24 +228,32 @@ export function InitTasks() {
   Threads.registerTask<[location: LocationData, data: VoxelPathData]>(
     "paint-voxel-path",
     async ([location, data]) => {
-      await LockSectors(location[0], buildAreaBounds);
+      const pathBounds = new BoundingBox(
+        Vector3Like.Create(location[1], location[2], location[3]),
+        Vector3Like.Create(location[1], location[2], location[3])
+      );
+      await LockSectors(location[0], pathBounds);
       brush.dimension = location[0];
       brush
         .setXYZ(location[1], location[2], location[3])
         .paintPath(new VoxelPath(data), updateData);
-      await UnLockSectors(location[0], buildAreaBounds);
+      await UnLockSectors(location[0], pathBounds);
     }
   );
 
   Threads.registerTask<[location: LocationData, data: VoxelPathData]>(
     "erase-voxel-path",
     async ([location, data]) => {
-      await LockSectors(location[0], buildAreaBounds);
+      const pathBounds = new BoundingBox(
+        Vector3Like.Create(location[1], location[2], location[3]),
+        Vector3Like.Create(location[1], location[2], location[3])
+      );
+      await LockSectors(location[0], pathBounds);
       brush.dimension = location[0];
       brush
         .setXYZ(location[1], location[2], location[3])
         .erasePath(new VoxelPath(data), updateData);
-      await UnLockSectors(location[0], buildAreaBounds);
+      await UnLockSectors(location[0], pathBounds);
     }
   );
 }

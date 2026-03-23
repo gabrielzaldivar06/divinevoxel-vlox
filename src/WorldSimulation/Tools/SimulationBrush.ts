@@ -17,6 +17,64 @@ import EraseVoxelTemplate from "../../Tasks/Paint/Erase/EraseVoxelTemplate";
 import EraseVoxelPath from "../../Tasks/Paint/Erase/EraseVoxelPath";
 import { IVoxelSelection } from "../../Templates/Selection/VoxelSelection";
 import EraseVoxelSelection from "../../Tasks/Paint/Erase/EraseVoxelSelection";
+import { canUpdate } from "../../Tasks/Paint/Common";
+
+function getBehaviorForVoxelId(voxelId: number) {
+  const tags = VoxelTagsRegister.VoxelTags[voxelId];
+  return VoxelBehaviorsRegister.get(
+    tags?.["dve_simulation_behavior"] || "default"
+  );
+}
+
+function forEachVoxelPathPosition(
+  voxelPath: VoxelPath,
+  updateData: VoxelUpdateData,
+  visitor: (x: number, y: number, z: number) => void
+) {
+  const visited = new Set<string>();
+
+  for (let i = 0; i < voxelPath.segments.length; i++) {
+    const { start, end } = voxelPath.segments[i];
+    const [sx, sy, sz] = start;
+    const [ex, ey, ez] = end;
+
+    const dx = ex - sx;
+    const dy = ey - sy;
+    const dz = ez - sz;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
+
+    if (steps === 0) {
+      if (!canUpdate(sx, sy, sz, updateData)) continue;
+      const key = `${sx}:${sy}:${sz}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      visitor(sx, sy, sz);
+      continue;
+    }
+
+    const stepX = dx / steps;
+    const stepY = dy / steps;
+    const stepZ = dz / steps;
+
+    let x = sx;
+    let y = sy;
+    let z = sz;
+
+    for (let step = 0; step <= steps; step++) {
+      const vx = Math.floor(x);
+      const vy = Math.floor(y);
+      const vz = Math.floor(z);
+      x += stepX;
+      y += stepY;
+      z += stepZ;
+      if (!canUpdate(vx, vy, vz, updateData)) continue;
+      const key = `${vx}:${vy}:${vz}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      visitor(vx, vy, vz);
+    }
+  }
+}
 
 export class SimulationBrush extends BrushTool {
   private taskTool: TaskTool;
@@ -44,7 +102,7 @@ export class SimulationBrush extends BrushTool {
       ];
 
     const behavior = VoxelBehaviorsRegister.get(
-      tags["dve_simulation_behavior"] || "default"
+      tags?.["dve_simulation_behavior"] || "default"
     );
     PaintVoxel(this._location, this.getRaw(), updateData);
     behavior.onPaint(this._dimension.simulation, x, y, z);
@@ -62,13 +120,13 @@ export class SimulationBrush extends BrushTool {
       ];
 
     const behavior = VoxelBehaviorsRegister.get(
-      tags["dve_simulation_behavior"] || "default"
+      tags?.["dve_simulation_behavior"] || "default"
     );
 
     await this.taskTool.voxel.paint.runAsync([
       this._location,
       this.getRaw(),
-      {},
+      updateData,
     ]);
     behavior.onPaint(this._dimension.simulation, x, y, z);
   }
@@ -96,14 +154,7 @@ export class SimulationBrush extends BrushTool {
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
           if (voxelTemplate.isAir(voxelTemplate.getIndex(x, y, z))) continue;
           if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onPaint(this._dimension.simulation, tx, ty, tz);
         }
@@ -134,14 +185,7 @@ export class SimulationBrush extends BrushTool {
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
           if (voxelTemplate.isAir(voxelTemplate.getIndex(x, y, z))) continue;
           if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onPaint(this._dimension.simulation, tx, ty, tz);
         }
@@ -158,6 +202,13 @@ export class SimulationBrush extends BrushTool {
       updateData
     );
 
+    forEachVoxelPathPosition(voxelPath, updateData, (tx, ty, tz) => {
+      const voxel = this.dataCursor.getVoxel(tx, ty, tz);
+      if (!voxel || voxel.isAir()) return;
+      const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
+      behavior.onPaint(this._dimension.simulation, tx, ty, tz);
+    });
+
     return this;
   }
 
@@ -169,6 +220,13 @@ export class SimulationBrush extends BrushTool {
       updateData,
     ]);
 
+    forEachVoxelPathPosition(voxelPath, updateData, (tx, ty, tz) => {
+      const voxel = this.dataCursor.getVoxel(tx, ty, tz);
+      if (!voxel || voxel.isAir()) return;
+      const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
+      behavior.onPaint(this._dimension.simulation, tx, ty, tz);
+    });
+
     return this;
   }
 
@@ -178,10 +236,11 @@ export class SimulationBrush extends BrushTool {
     const y = this.y;
     const z = this.z;
     const voxel = this._dimension.simulation.getVoxelForUpdate(x, y, z);
-    const tags = VoxelTagsRegister.VoxelTags[voxel.getVoxelId()];
-    const behavior = VoxelBehaviorsRegister.get(
-      tags["dve_simulation_behavior"] || "default"
-    );
+    if (!voxel || voxel.isAir()) {
+      EraseVoxel(this._location, updateData);
+      return this;
+    }
+    const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
     EraseVoxel(this._location, updateData);
     behavior.onErase(this._dimension.simulation, x, y, z);
     return this;
@@ -193,10 +252,11 @@ export class SimulationBrush extends BrushTool {
     const y = this.y;
     const z = this.z;
     const voxel = this._dimension.simulation.getVoxelForUpdate(x, y, z);
-    const tags = VoxelTagsRegister.VoxelTags[voxel.getVoxelId()];
-    const behavior = VoxelBehaviorsRegister.get(
-      tags["dve_simulation_behavior"] || "default"
-    );
+    if (!voxel || voxel.isAir()) {
+      await this.taskTool.voxel.erase.runAsync([this._location, updateData]);
+      return;
+    }
+    const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
     await this.taskTool.voxel.erase.runAsync([this._location, updateData]);
     behavior.onErase(this._dimension.simulation, x, y, z);
   }
@@ -215,15 +275,8 @@ export class SimulationBrush extends BrushTool {
           const tz = oz + z;
           if (voxelTemplate.isAir(voxelTemplate.getIndex(x, y, z))) continue;
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
-          if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          if (!voxel || voxel.isAir()) continue;
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onErase(this._dimension.simulation, tx, ty, tz);
         }
@@ -254,15 +307,8 @@ export class SimulationBrush extends BrushTool {
           const tz = oz + z;
           if (voxelTemplate.isAir(voxelTemplate.getIndex(x, y, z))) continue;
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
-          if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          if (!voxel || voxel.isAir()) continue;
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onErase(this._dimension.simulation, tx, ty, tz);
         }
@@ -288,17 +334,10 @@ export class SimulationBrush extends BrushTool {
           const tx = ox + x;
           const ty = oy + y;
           const tz = oz + z;
-          if (selection.isSelected(tx, ty, tz)) continue;
+          if (!selection.isSelected(tx, ty, tz)) continue;
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
-          if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          if (!voxel || voxel.isAir()) continue;
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onErase(this._dimension.simulation, tx, ty, tz);
         }
@@ -327,23 +366,16 @@ export class SimulationBrush extends BrushTool {
           const tx = ox + x;
           const ty = oy + y;
           const tz = oz + z;
-          if (selection.isSelected(tx, ty, tz)) continue;
+          if (!selection.isSelected(tx, ty, tz)) continue;
           const voxel = this.dataCursor.getVoxel(tx, ty, tz);
-          if (!voxel) continue;
-          const tags =
-            VoxelTagsRegister.VoxelTags[
-              VoxelLUT.voxelIds.getNumberId(this.data.id)
-            ];
-
-          const behavior = VoxelBehaviorsRegister.get(
-            tags["dve_simulation_behavior"] || "default"
-          );
+          if (!voxel || voxel.isAir()) continue;
+          const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
 
           behavior.onErase(this._dimension.simulation, tx, ty, tz);
         }
       }
     }
-    await this.taskTool.voxel.eraseTemplate.runAsync([
+    await this.taskTool.voxel.eraseSelection.runAsync([
       this.dimension,
       [this.x, this.y, this.z],
       selection.toJSON(),
@@ -354,6 +386,13 @@ export class SimulationBrush extends BrushTool {
   }
 
   erasePath(voxelPath: VoxelPath, updateData: VoxelUpdateData = {}) {
+    forEachVoxelPathPosition(voxelPath, updateData, (tx, ty, tz) => {
+      const voxel = this.dataCursor.getVoxel(tx, ty, tz);
+      if (!voxel || voxel.isAir()) return;
+      const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
+      behavior.onErase(this._dimension.simulation, tx, ty, tz);
+    });
+
     EraseVoxelPath(
       this.dimension,
       [this.x, this.y, this.z],
@@ -365,6 +404,13 @@ export class SimulationBrush extends BrushTool {
   }
 
   async erasePathAsync(voxelPath: VoxelPath, updateData: VoxelUpdateData = {}) {
+    forEachVoxelPathPosition(voxelPath, updateData, (tx, ty, tz) => {
+      const voxel = this.dataCursor.getVoxel(tx, ty, tz);
+      if (!voxel || voxel.isAir()) return;
+      const behavior = getBehaviorForVoxelId(voxel.getVoxelId());
+      behavior.onErase(this._dimension.simulation, tx, ty, tz);
+    });
+
     await this.taskTool.voxel.erasePath.runAsync([
       this.dimension,
       [this.x, this.y, this.z],

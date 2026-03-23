@@ -19,7 +19,7 @@ export class PaintVoxelData {
       data.secondaryMod,
       data.secondaryModString,
       data.secondaryState,
-      data.secondaryModString
+      data.secondaryStateString
     );
   }
 
@@ -45,7 +45,7 @@ export class PaintVoxelData {
         VoxelLUT.voxelIdToNameMap.get(paintData.secondaryVoxelId) || "";
     }
     paintData.level = VoxelLevelReader.getLevel(data[2]);
-    paintData.levelState = VoxelLevelReader.getLevel(data[2]);
+    paintData.levelState = VoxelLevelReader.getLevelState(data[2]);
     return paintData;
   }
 
@@ -56,7 +56,7 @@ export class PaintVoxelData {
       : data.name
       ? VoxelLUT.voxelNametoIdMap.get(data.name)!
       : "dve_air";
-    let secondaryStringId = data.secondaryName
+    let secondaryStringId = data.secondaryVoxelId
       ? data.secondaryVoxelId
       : data.secondaryName
       ? VoxelLUT.voxelNametoIdMap.get(data.secondaryName)!
@@ -179,7 +179,7 @@ export class PaintVoxelData {
       : data.name
       ? VoxelLUT.voxelNametoIdMap.get(data.name)!
       : "dve_air";
-    let secondaryStringId = data.secondaryName
+    let secondaryStringId = data.secondaryVoxelId
       ? data.secondaryVoxelId
       : data.secondaryName
       ? VoxelLUT.voxelNametoIdMap.get(data.secondaryName)!

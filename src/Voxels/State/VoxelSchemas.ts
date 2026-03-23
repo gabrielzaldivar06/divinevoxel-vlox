@@ -16,11 +16,11 @@ export type VoxelSchemasExport = {
 };
 
 export class VoxelSchemas {
-  //maps voxel model ids to the their state scehma
+  //maps voxel model ids to their state schema
   static state = new Map<string, BinarySchema>();
   //maps voxel model number ids to their state schemas
   static stateMap: BinarySchema[] = [];
-  //maps voxel ids to their mod schemao
+  //maps voxel ids to their mod schema
   static mod = new Map<string, BinarySchema>();
   //maps voxel  number ids to their state schemas
   static modMap: BinarySchema[] = [];

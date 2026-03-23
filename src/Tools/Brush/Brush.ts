@@ -48,6 +48,12 @@ export class BrushTool {
     this.data.level = data.level ? data.level : 0;
     this.data.levelState = data.levelState ? data.levelState : 0;
     this.data.mod = data.mod ? data.mod : 0;
+    this.data.stateString = data.stateString || "";
+    this.data.modString = data.modString || "";
+    this.data.secondaryState = data.secondaryState ? data.secondaryState : 0;
+    this.data.secondaryMod = data.secondaryMod ? data.secondaryMod : 0;
+    this.data.secondaryStateString = data.secondaryStateString || "";
+    this.data.secondaryModString = data.secondaryModString || "";
     return this;
   }
   getData() {
@@ -129,10 +135,17 @@ export class BrushTool {
     this.data.id = "dve_air";
     this.data.name = "";
     this.data.secondaryVoxelId = "";
+    this.data.secondaryName = "";
     this.data.level = 0;
     this.data.levelState = 0;
     this.data.state = 0;
     this.data.mod = 0;
+    this.data.stateString = "";
+    this.data.modString = "";
+    this.data.secondaryState = 0;
+    this.data.secondaryMod = 0;
+    this.data.secondaryStateString = "";
+    this.data.secondaryModString = "";
     this.x = 0;
     this.y = 0;
     this.z = 0;
@@ -232,7 +245,7 @@ export class BrushTool {
           const tz = oz + z;
           if (!this.dataCursor.inBounds(tx, ty, tz)) continue;
           if (voxelTemplate.isAir(voxelTemplate.getIndex(x, y, z))) continue;
-          this.setXYZ(x, y, z).erase();
+          this.setXYZ(tx, ty, tz).erase();
         }
       }
     }
@@ -250,7 +263,7 @@ export class BrushTool {
           const tz = oz + z;
           if (!this.dataCursor.inBounds(tx, ty, tz)) continue;
           if (!selection.isSelected(tx, ty, tz)) continue;
-          this.setXYZ(x, y, z).erase();
+          this.setXYZ(tx, ty, tz).erase();
         }
       }
     }

@@ -37,7 +37,7 @@ function getAllCombinations(valuePairs: [string, string[]][]) {
   return result;
 }
 
-function buildScehmas(voxels: VoxelData[], models: VoxelModelData[]) {
+function buildSchemas(voxels: VoxelData[], models: VoxelModelData[]) {
   const totalModelStates = new Map<string, number>();
   const totalModelRelationalStates = new Map<string, number>();
   VoxelLUT.models.register("dve_air");
@@ -404,7 +404,7 @@ export function BuildLUTs(
     VoxelLUT.substance.register(substance.id);
   }
 
-  buildScehmas(voxels, models);
+  buildSchemas(voxels, models);
   buildStatePalette(voxels, models);
   buildReltionalStatePalette(voxels, models);
 

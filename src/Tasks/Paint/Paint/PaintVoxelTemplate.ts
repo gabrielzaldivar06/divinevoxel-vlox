@@ -1,10 +1,12 @@
 import { PaintVoxelTemplateTask, VoxelUpdateData } from "../../Tasks.types";
 import { VoxelUpdateTask } from "../../VoxelUpdateTask";
-import { canUpdate, updateArea } from "../Common";
+import { canUpdate, updateArea, updatePowerTask } from "../Common";
 import { VoxelTemplateRegister } from "../../../Templates/VoxelTemplateRegister";
 import { RawVoxelData } from "../../../Voxels/Types/Voxel.types";
 import { Vec3Array } from "@amodx/math";
 import { IVoxelTemplateData } from "../../../Templates/VoxelTemplates.types";
+import { EngineSettings as ES } from "../../../Settings/EngineSettings";
+import { PowerUpdate } from "../../Propagation/Power/PowerUpdate";
 
 const tasks = new VoxelUpdateTask();
 const raw: RawVoxelData = [0, 0, 0, 0];
@@ -16,6 +18,7 @@ export default function PaintVoxelTemplate(
 ) {
   const voxelTemplate = VoxelTemplateRegister.create(templateData);
   tasks.setOriginAt([dimension, ox, oy, oz]);
+  let needsPowerUpdate = false;
 
   const { x: sx, y: sy, z: sz } = voxelTemplate.bounds.size;
 
@@ -36,9 +39,20 @@ export default function PaintVoxelTemplate(
         raw[1] = 0;
         voxel.setRaw(raw);
         voxel.updateVoxel(0);
+
+        if (ES.doPower && voxel.doesVoxelAffectLogic()) {
+          tasks.setOriginAt([dimension, tx, ty, tz]);
+          updatePowerTask(tasks);
+          tasks.power.update.push(tx, ty, tz);
+          needsPowerUpdate = true;
+        }
       }
     }
   }
 
+  tasks.setOriginAt([dimension, ox, oy, oz]);
   updateArea(tasks, ox, oy, oz, ox + sx, oy + sy, oz + sz);
+  if (needsPowerUpdate) {
+    PowerUpdate(tasks);
+  }
 }

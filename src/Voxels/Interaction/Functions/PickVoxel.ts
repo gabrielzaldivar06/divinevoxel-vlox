@@ -69,6 +69,23 @@ export default function PickVoxel(
         const n = Vector3Like.Clone(normal);
         const pos = Vector3Like.Create(cursorX, cursorY, cursorZ);
         const un = Vector3Like.FromArray(closestUnitNormal(n));
+
+        // Compute delta: fractional position on the intersected face
+        let delta = 0;
+        if (n.x !== 0 || n.y !== 0 || n.z !== 0) {
+          const hitPoint = Vector3Like.Add(
+            Vector3Like.Clone(rayOrigin),
+            Vector3Like.MultiplyScalar(Vector3Like.Clone(rayDir), traveled),
+          );
+          if (n.x !== 0) {
+            delta = hitPoint.y - Math.floor(hitPoint.y);
+          } else if (n.y !== 0) {
+            delta = hitPoint.z - Math.floor(hitPoint.z);
+          } else {
+            delta = hitPoint.y - Math.floor(hitPoint.y);
+          }
+        }
+
         return new VoxelPickResult(
           rayOrigin,
           rayDir,
@@ -82,7 +99,7 @@ export default function PickVoxel(
           closestVoxelFace(urd),
           Vector3Like.FromArray(closestUnitNormal(n)),
           closestVoxelFace(un),
-          0,
+          delta,
         );
       }
     }

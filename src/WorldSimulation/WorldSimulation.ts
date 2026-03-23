@@ -179,6 +179,8 @@ export class WorldSimulation {
       WorldSimulationTasks.unloadTasks.runTask(50);
       WorldSimulationTasks.unbuildTasks.runTask();
     }
+
+    return total;
   }
 }
 

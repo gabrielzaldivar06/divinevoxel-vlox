@@ -637,6 +637,7 @@ export function MeshSectionSurfaceNets(
 
   // ── Phase 3: Collect, cull degenerate micro-meshes, and compact ───────────
   const meshed: VoxelModelBuilder[] = [];
+
   for (let i = 0; i < RenderedMaterials.meshers.length; i++) {
     const mesher = RenderedMaterials.meshers[i];
     if (!mesher.mesh.vertexCount) {
