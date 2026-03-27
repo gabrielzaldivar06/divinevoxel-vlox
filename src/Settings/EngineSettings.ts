@@ -33,6 +33,10 @@ class EngineSettingsClass extends TypedEventTarget<EngineSettingsEvents> {
     return this.settings.propagation.powerEnabled;
   }
 
+  get doGravity() {
+    return this.settings.propagation.gravityEnabled;
+  }
+
   getSettings() {
     return this.settings;
   }

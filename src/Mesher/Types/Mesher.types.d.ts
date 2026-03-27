@@ -1,5 +1,19 @@
 import { Vec3Array } from "@amodx/math";
-export type SetSectionMeshTask = ArrayBuffer;
+import type { WaterSectionGPUData } from "../../Water/Types/WaterTypes";
+export interface WaterSectionUpdateTask {
+  originX: number;
+  originZ: number;
+  boundsX: number;
+  boundsZ: number;
+  paddedBoundsX: number;
+  paddedBoundsZ: number;
+  gpuData: WaterSectionGPUData;
+}
+export interface SetSectionMeshTask {
+  meshBuffer: ArrayBuffer;
+  waterUpdate?: WaterSectionUpdateTask;
+}
+export declare function getSetSectionMeshTaskTransfers(task: SetSectionMeshTask): ArrayBufferLike[];
 export type CompactSubMesh = [
     materialId: string,
     vertexBuffer: Float32Array,

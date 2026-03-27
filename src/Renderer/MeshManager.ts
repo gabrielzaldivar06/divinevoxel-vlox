@@ -1,4 +1,4 @@
-import type { SetSectionMeshTask } from "../Mesher/Types/Mesher.types";
+import type { SetSectionMeshTask, WaterSectionUpdateTask } from "../Mesher/Types/Mesher.types";
 import { MeshRegister } from "./MeshRegister.js";
 import { LocationData } from "../Math/index.js";
 import { DVESectionMeshes } from "./Classes/DVESectionMeshes";
@@ -12,7 +12,8 @@ const location: LocationData = [0, 0, 0, 0];
 
 export type SectionMeshCallback = (
   sectorKey: string,
-  meshes: { materialId: string; vertices: Float32Array; sectionOrigin: [number, number, number] }[]
+  meshes: { materialId: string; vertices: Float32Array; sectionOrigin: [number, number, number] }[],
+  waterUpdate?: WaterSectionUpdateTask,
 ) => void;
 
 export type SectorRemovedCallback = (sectorKey: string) => void;
@@ -36,7 +37,7 @@ export class MeshManager {
   static onVoxelErased: VoxelErasedCallback | null = null;
 
   static updateSection(data: SetSectionMeshTask) {
-    compacted.setData(data);
+    compacted.setData(data.meshBuffer);
 
     compacted.getLocation(location);
 
@@ -87,7 +88,7 @@ export class MeshManager {
           sectionOrigin: [location[1], location[2], location[3]],
         });
       }
-      this.onSectionUpdated(sectorKey, meshes);
+      this.onSectionUpdated(sectorKey, meshes, data.waterUpdate);
     }
   }
   static removeSector(dimensionId: number, x: number, y: number, z: number) {

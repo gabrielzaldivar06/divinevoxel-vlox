@@ -113,12 +113,7 @@ export class DimensionSimulation {
   }
 
   getVoxelForUpdate(x: number, y: number, z: number) {
-    const voxel = this.cursor.getVoxel(x, y, z);
-    if (!voxel)
-      throw new Error(
-        `Tried to run tick update on voxel that does not exist at [${x} ${y} ${z}]`
-      );
-    return voxel;
+    return this.cursor.getVoxel(x, y, z);
   }
 
   scheduleUpdate(
@@ -133,10 +128,7 @@ export class DimensionSimulation {
       recordHydrologyLiquidSchedule();
     }
     const active = this.dimension.activeSectors.get(x, y, z);
-    if (!active)
-      throw new Error(
-        `Tried to schedule a voxel update on a non loaded active sector`
-      );
+    if (!active) return;
     const update = new VoxelTickUpdate(type, x, y, z, data);
     active.tickQueue.addTick(update, delay);
   }

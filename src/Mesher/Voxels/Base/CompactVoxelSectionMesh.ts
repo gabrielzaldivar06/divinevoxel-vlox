@@ -1,4 +1,4 @@
-import { SetSectionMeshTask } from "../../Types/Mesher.types";
+import { SetSectionMeshTask, WaterSectionUpdateTask } from "../../Types/Mesher.types";
 import { VoxelModelBuilder } from "../Models/VoxelModelBuilder";
 import { VoxelMeshVertexStructCursor } from "../Geometry/VoxelMeshVertexStructCursor";
 import { LocationData } from "../../../Math";
@@ -6,6 +6,7 @@ import {
   CompactedSectionVoxelMesh,
   CompactedMeshData,
 } from "../Geometry/CompactedSectionVoxelMesh";
+import type { WaterSectionGrid } from "../../../Water/Types/WaterTypes";
 
 const meshData = new CompactedMeshData();
 const compactedMesh = new CompactedSectionVoxelMesh();
@@ -18,6 +19,7 @@ function align4(value: number) {
 export function CompactVoxelSectionMesh(
   location: LocationData,
   tools: VoxelModelBuilder[],
+  waterGrid?: WaterSectionGrid,
   transfers: any[] = []
 ): SetSectionMeshTask {
   // 1) First compute how large the final buffer needs to be (with 4-byte alignment).
@@ -144,9 +146,55 @@ export function CompactVoxelSectionMesh(
   }
 
   // Transfer the ArrayBuffer to your worker if needed
+  const task: SetSectionMeshTask = {
+    meshBuffer: buffer,
+  };
+
   transfers.push(buffer);
 
+  if (waterGrid && waterGrid.filledCount > 0) {
+    const waterUpdate: WaterSectionUpdateTask = {
+      originX: waterGrid.originX,
+      originZ: waterGrid.originZ,
+      boundsX: waterGrid.boundsX,
+      boundsZ: waterGrid.boundsZ,
+      paddedBoundsX: waterGrid.paddedBoundsX,
+      paddedBoundsZ: waterGrid.paddedBoundsZ,
+      gpuData: {
+        columnBuffer: waterGrid.gpuData.columnBuffer.slice(),
+        columnStride: waterGrid.gpuData.columnStride,
+        paddedColumnBuffer: waterGrid.gpuData.paddedColumnBuffer.slice(),
+        paddedColumnStride: waterGrid.gpuData.paddedColumnStride,
+        columnMetadata: waterGrid.gpuData.columnMetadata.slice(),
+        paddedColumnMetadata: waterGrid.gpuData.paddedColumnMetadata.slice(),
+        particleSeedBuffer: waterGrid.gpuData.particleSeedBuffer.slice(),
+        particleSeedStride: waterGrid.gpuData.particleSeedStride,
+        particleSeedCount: waterGrid.gpuData.particleSeedCount,
+        interactionField: waterGrid.gpuData.interactionField.slice(),
+        interactionFieldSize: waterGrid.gpuData.interactionFieldSize,
+        largeBodyField: waterGrid.gpuData.largeBodyField.slice(),
+        largeBodyFieldSize: waterGrid.gpuData.largeBodyFieldSize,
+        patchSummaryBuffer: waterGrid.gpuData.patchSummaryBuffer.slice(),
+        patchSummaryStride: waterGrid.gpuData.patchSummaryStride,
+        patchSummaryCount: waterGrid.gpuData.patchSummaryCount,
+        patchMetadata: waterGrid.gpuData.patchMetadata.slice(),
+        columnPatchIndex: waterGrid.gpuData.columnPatchIndex.slice(),
+      },
+    };
+    task.waterUpdate = waterUpdate;
+    transfers.push(
+      waterUpdate.gpuData.columnBuffer.buffer,
+      waterUpdate.gpuData.paddedColumnBuffer.buffer,
+      waterUpdate.gpuData.columnMetadata.buffer,
+      waterUpdate.gpuData.paddedColumnMetadata.buffer,
+      waterUpdate.gpuData.particleSeedBuffer.buffer,
+      waterUpdate.gpuData.interactionField.buffer,
+      waterUpdate.gpuData.largeBodyField.buffer,
+      waterUpdate.gpuData.patchSummaryBuffer.buffer,
+      waterUpdate.gpuData.patchMetadata.buffer,
+      waterUpdate.gpuData.columnPatchIndex.buffer,
+    );
+  }
 
-  // Return the buffer or the task object as needed
-  return buffer as unknown as SetSectionMeshTask;
+  return task;
 }

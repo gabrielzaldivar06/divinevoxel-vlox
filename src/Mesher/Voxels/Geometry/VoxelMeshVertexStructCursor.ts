@@ -1,6 +1,6 @@
 export const VoxelMeshVertexConstants = {
-  VertexFloatSize: 28,
-  VertexByteSize: 28 * 4,
+  VertexFloatSize: 31,            // was 28; +3 = WaterGradient(X,Z) + WaterCurvature
+  VertexByteSize: 31 * 4,
   PositionOffset: 0,
   NormalOffset: 4,
   TextureIndexOffset: 8,
@@ -15,9 +15,15 @@ export const VoxelMeshVertexConstants = {
   PullDirectionBiasOffset: 17,    // padding[3] — after color rgb
   SubdivAOOffset: 26,             // tail float 0 — vertex-baked AO
   PhNormalizedOffset: 27,         // tail float 1 — phase-height normalized
+  // Water Phase 3 — surface derivative fields (slots 28-30)
+  // Non-water meshers leave these as 0. Water shaders read them for GPU-side
+  // curvature estimation, eliminating CPU derivative logic post-upload.
+  WaterGradientXOffset: 28,       // local surface dY/dX ≈ -nx/ny
+  WaterGradientZOffset: 29,       // local surface dY/dZ ≈ -nz/ny
+  WaterCurvatureOffset: 30,       // surface curvature proxy: cell slope scalar
 };
 export class VoxelMeshVertexStructCursor {
-  static VertexFloatSize = 28;
+  static VertexFloatSize = 31;             // was 28; +3 = WaterGradient(X,Z) + WaterCurvature
   static VertexByteSize = this.VertexFloatSize * 4;
   static PositionOffset = 0;
   static NormalOffset = 4;
@@ -33,6 +39,10 @@ export class VoxelMeshVertexStructCursor {
   static PullDirectionBiasOffset = 17;    // padding[3] — after color rgb
   static SubdivAOOffset = 26;             // tail float 0 — vertex-baked AO
   static PhNormalizedOffset = 27;         // tail float 1 — phase-height normalized
+  // Water Phase 3 — surface derivative fields (slots 28-30)
+  static WaterGradientXOffset = 28;
+  static WaterGradientZOffset = 29;
+  static WaterCurvatureOffset = 30;
 
   // position
   get positionX() {

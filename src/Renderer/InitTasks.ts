@@ -1,4 +1,4 @@
-import type { SetSectionMeshTask } from "../Mesher/Types/Mesher.types";
+import { getSetSectionMeshTaskTransfers, type SetSectionMeshTask } from "../Mesher/Types/Mesher.types";
 import type { LocationData } from "Math/index.js";
 import { Threads } from "@amodx/threads/";
 import { MeshManager } from "./MeshManager";
@@ -11,7 +11,7 @@ export default function RendererTasks() {
   Threads.registerTask<SetSectionMeshTask>("set-section", (data, origin) => {
     MeshManager.updateSection(data);
     if (!EngineSettings.settings.rendererSettings.cpuBound) {
-      origin.sendMessage([], [data]);
+      origin.sendMessage([], getSetSectionMeshTaskTransfers(data));
     }
   });
   Threads.registerBinaryTask("remove-sector", (data) => {

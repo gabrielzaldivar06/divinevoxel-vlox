@@ -120,6 +120,13 @@ export class VoxelGeometryBuilderCacheSpace {
       return;
     }
 
+    // Guard: voxel exists but its LUT mapping is not yet initialised (startup race).
+    // Treat it as non-renderable until the mapping is available.
+    if (!voxel.tags) {
+      this.foundHash[index] = 1;
+      return;
+    }
+
     const trueVoxelId = voxel.getVoxelId();
     const voxelId = voxel.getId();
 

@@ -47,6 +47,7 @@ export class PropagationSettings {
   sunLightEnabled = true;
   flowEnabled = true;
   powerEnabled = true;
+  gravityEnabled = true;
 }
 
 export interface MemoryAndCPUSettings {}
@@ -106,11 +107,18 @@ export class TerrainSettingsData {
   maxSceneMeshes = 800;
 }
 
+export interface WaterRenderingSettingsData {}
+export class WaterRenderingSettingsData {
+  /** Selects how broad open-surface water masses are rendered. */
+  largeWaterVisibleMode: "legacy" | "patch-preview" | "continuous-patch" = "continuous-patch";
+}
+
 export class EngineSettingsData {
   memoryAndCPU = new MemoryAndCPUSettings();
   mesher = new MesherSettingsData();
   rendererSettings = new RenderSettingsData();
   terrain = new TerrainSettingsData();
+  water = new WaterRenderingSettingsData();
   updating = new UpdatingSettings();
   world = new WorldSettings();
   propagation = new PropagationSettings();

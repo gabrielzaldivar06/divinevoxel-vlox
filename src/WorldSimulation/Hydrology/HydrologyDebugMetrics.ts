@@ -6,6 +6,9 @@ type HydrologyMetricsSnapshot = {
   pendingVoxelUpdates: number;
   liquidRuns: number;
   liquidSchedules: number;
+  diagonalSpills: number;
+  lateralEqualizations: number;
+  terraceHoldCandidates: number;
   worldFlowActivations: number;
   settledTickStreak: number;
   settled: boolean;
@@ -27,6 +30,9 @@ const state: HydrologyMetricsState = {
   pendingVoxelUpdates: 0,
   liquidRuns: 0,
   liquidSchedules: 0,
+  diagonalSpills: 0,
+  lateralEqualizations: 0,
+  terraceHoldCandidates: 0,
   worldFlowActivations: 0,
   settledTickStreak: 0,
   settled: false,
@@ -45,6 +51,9 @@ export function resetHydrologyDebugMetrics(flowEnabled = false) {
   state.pendingVoxelUpdates = 0;
   state.liquidRuns = 0;
   state.liquidSchedules = 0;
+  state.diagonalSpills = 0;
+  state.lateralEqualizations = 0;
+  state.terraceHoldCandidates = 0;
   state.worldFlowActivations = 0;
   state.settledTickStreak = 0;
   state.settled = false;
@@ -65,6 +74,9 @@ export function beginHydrologyDebugTick(nowMs: number) {
   state.lastTickStartMs = nowMs;
   state.liquidRuns = 0;
   state.liquidSchedules = 0;
+  state.diagonalSpills = 0;
+  state.lateralEqualizations = 0;
+  state.terraceHoldCandidates = 0;
   state.worldFlowActivations = 0;
 }
 
@@ -74,6 +86,18 @@ export function recordHydrologyLiquidRun() {
 
 export function recordHydrologyLiquidSchedule() {
   state.liquidSchedules++;
+}
+
+export function recordHydrologyDiagonalSpill() {
+  state.diagonalSpills++;
+}
+
+export function recordHydrologyLateralEqualization() {
+  state.lateralEqualizations++;
+}
+
+export function recordHydrologyTerraceHoldCandidate() {
+  state.terraceHoldCandidates++;
 }
 
 export function recordHydrologyWorldFlowActivation() {
@@ -91,6 +115,9 @@ export function endHydrologyDebugTick(nowMs: number, pendingVoxelUpdates: number
     pendingVoxelUpdates > 0 ||
     state.liquidRuns > 0 ||
     state.liquidSchedules > 0 ||
+    state.diagonalSpills > 0 ||
+    state.lateralEqualizations > 0 ||
+    state.terraceHoldCandidates > 0 ||
     state.worldFlowActivations > 0;
 
   if (active) {
@@ -118,6 +145,9 @@ export function getHydrologyDebugMetricsSnapshot(): HydrologyMetricsSnapshot {
     pendingVoxelUpdates: state.pendingVoxelUpdates,
     liquidRuns: state.liquidRuns,
     liquidSchedules: state.liquidSchedules,
+    diagonalSpills: state.diagonalSpills,
+    lateralEqualizations: state.lateralEqualizations,
+    terraceHoldCandidates: state.terraceHoldCandidates,
     worldFlowActivations: state.worldFlowActivations,
     settledTickStreak: state.settledTickStreak,
     settled: state.settled,

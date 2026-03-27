@@ -42,14 +42,16 @@ export abstract class VoxelCursorInterface {
     this.id = this.ids[this._index];
     this.secondaryId = this.secondary[this._index];
 
-    this._voxelId = this.__readingSecondaryVoxel
-      ? VoxelLUT.voxelIdToTrueId[this.secondary[this._index]]
-      : VoxelLUT.voxelIdToTrueId[this.ids[this._index]];
-      
-    this.tags = VoxelTagsRegister.VoxelTags[this._voxelId];
+    this._voxelId =
+      (this.__readingSecondaryVoxel
+        ? VoxelLUT.voxelIdToTrueId[this.secondary[this._index]]
+        : VoxelLUT.voxelIdToTrueId[this.ids[this._index]]) ?? 0;
+
+    this.tags =
+      VoxelTagsRegister.VoxelTags[this._voxelId] ?? ({} as VoxelTags);
 
     this.substanceTags =
-      VoxelTagsRegister.SubstanceTags[VoxelLUT.substanceMap[this._voxelId]];
+      VoxelTagsRegister.SubstanceTags[VoxelLUT.substanceMap[this._voxelId]] ?? ({} as VoxelSubstanceTags);
   }
 
   abstract loadIn(): void;
@@ -81,7 +83,7 @@ export abstract class VoxelCursorInterface {
     return this.substanceTags;
   }
   isOpaque() {
-    return !this.tags[VoxelTagIds.isTransparent];
+    return this.tags ? !this.tags[VoxelTagIds.isTransparent] : false;
   }
 
   getLevel() {
@@ -145,7 +147,7 @@ export abstract class VoxelCursorInterface {
   }
 
   isLightSource() {
-    if (this._voxelId <= 0) return false;
+    if (!this._voxelId) return false;
     if (
       VoxelLogicRegister.voxels[this._voxelId]?.hasTag(
         VoxelTagIds.isLightSource,
@@ -156,6 +158,7 @@ export abstract class VoxelCursorInterface {
         this,
       );
     }
+    if (!this.tags) return false;
     return this.tags[VoxelTagIds.isLightSource];
   }
 
@@ -224,7 +227,8 @@ export abstract class VoxelCursorInterface {
   }
 
   noAO() {
-    if (this._voxelId <= 0) return false;
+    if (!this._voxelId) return false;
+    if (!this.tags) return false;
     return this.tags[VoxelTagIds.noAO];
   }
   isRenderable() {

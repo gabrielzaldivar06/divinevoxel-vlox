@@ -36,6 +36,38 @@ function computeShelter(
   return solidCount / 3;
 }
 
+function computeHydrologySignal(
+  builder: VoxelModelBuilder,
+  x: number,
+  y: number,
+  z: number,
+  shelter: number,
+) {
+  let directContact = 0;
+  let retainedMoisture = 0;
+
+  for (let dy = -1; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        const neighbor = builder.nVoxel.getVoxel(x + dx, y + dy, z + dz);
+        if (!neighbor || !neighbor.substanceTags["dve_is_liquid"]) continue;
+
+        const horizontalDistance = Math.hypot(dx, dz);
+        const distance = horizontalDistance + Math.abs(dy) * 0.8;
+        const proximity = clamp01(1 - distance / 3.25);
+        if (proximity <= 0) continue;
+
+        const verticalBias = dy < 0 ? 0.78 : dy === 0 ? 1 : 0.62;
+        directContact = Math.max(directContact, proximity * verticalBias);
+        retainedMoisture += proximity * (0.05 + verticalBias * 0.08);
+      }
+    }
+  }
+
+  return clamp01(directContact * 0.74 + clamp01(retainedMoisture) * (0.22 + shelter * 0.18));
+}
+
 const cardinalOffsets: [number, number, number][] = [
   [1, 0, 0],
   [-1, 0, 0],
@@ -49,19 +81,17 @@ function computeWorldContext(
   builder: VoxelModelBuilder,
   x: number,
   y: number,
-  z: number
+  z: number,
+  shelter: number,
 ): typeof worldContextCache {
   let opaqueCount = 0;
-  let sameIdCount = 0;
   let maxSun = 0;
-  const currentId = builder.voxel.getVoxelId();
   for (let i = 0; i < 6; i++) {
     const [dx, dy, dz] = cardinalOffsets[i];
     const neighbor = builder.nVoxel.getVoxel(x + dx, y + dy, z + dz);
     if (neighbor) {
       if (neighbor.isRenderable() && neighbor.isOpaque()) {
         opaqueCount++;
-        if (neighbor.getVoxelId() === currentId) sameIdCount++;
       } else {
         const light = neighbor.getLight();
         if (light >= 0) {
@@ -73,7 +103,7 @@ function computeWorldContext(
   }
   worldContextCache.x = maxSun / 15;
   worldContextCache.y = opaqueCount / 6;
-  worldContextCache.z = 1 - sameIdCount / 6;
+  worldContextCache.z = computeHydrologySignal(builder, x, y, z, shelter);
   return worldContextCache;
 }
 
@@ -82,10 +112,11 @@ function createSurfaceMetadata(
   aoValue: number,
   positionY: number,
   shelter: number,
-  target: Vector4Like
+  target: Vector4Like,
+  avgNY: number = normal.y
 ) {
-  const topExposure = clamp01(normal.y);
-  const slope = clamp01(1 - Math.abs(normal.y));
+  const topExposure = clamp01(avgNY);
+  const slope = clamp01(1 - Math.abs(avgNY));
   const rawCavity = clamp01(aoValue / 3);
   const cavity = clamp01(rawCavity * 0.7 + shelter * 0.3);
   const heightNorm = clamp01((positionY - 16) / 112);
@@ -107,7 +138,7 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   const overlayTextures = builder.vars.overlayTextures;
   const posY = builder.position.y;
   const shelter = computeShelter(builder.nVoxel, builder.position.x, builder.position.y, builder.position.z);
-  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z);
+  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z, shelter);
   const topRightPos = tri.positions.vertices[0];
   const topLeftPos = tri.positions.vertices[1];
   const bottomLeftPos = tri.positions.vertices[2];
@@ -129,12 +160,19 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
     QuadVerticies.TopRight,
     vector1ShaderData
   );
+  const _triAvgNY = (topRightNor.y + topLeftNor.y + bottomLeftNor.y) / 3;
+  const _triAvgAO =
+    (worldAO.vertices[QuadVerticies.TopRight] +
+      worldAO.vertices[QuadVerticies.TopLeft] +
+      worldAO.vertices[QuadVerticies.BottomLeft]) /
+    3;
   const topRightMetadata = createSurfaceMetadata(
     topRightNor,
-    worldAO.vertices[QuadVerticies.TopRight],
+    _triAvgAO,
     posY,
     shelter,
-    vector1Metadata
+    vector1Metadata,
+    _triAvgNY
   );
   const topLeftVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
@@ -151,10 +189,11 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   );
   const topLeftMetadata = createSurfaceMetadata(
     topLeftNor,
-    worldAO.vertices[QuadVerticies.TopLeft],
+    _triAvgAO,
     posY,
     shelter,
-    vector2Metadata
+    vector2Metadata,
+    _triAvgNY
   );
   const bottomLeftVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
@@ -171,10 +210,11 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   );
   const bottomLeftMetadata = createSurfaceMetadata(
     bottomLeftNor,
-    worldAO.vertices[QuadVerticies.BottomLeft],
+    _triAvgAO,
     posY,
     shelter,
-    vector3Metadata
+    vector3Metadata,
+    _triAvgNY
   );
 
   const indices = builder.mesh!.indices;
@@ -272,7 +312,7 @@ export function addVoxelQuad(
   const overlayTextures = builder.vars.overlayTextures;
   const posY = builder.position.y;
   const shelter = computeShelter(builder.nVoxel, builder.position.x, builder.position.y, builder.position.z);
-  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z);
+  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z, shelter);
   const topRightPos = quad.positions.vertices[0];
   const topLeftPos = quad.positions.vertices[1];
   const bottomLeftPos = quad.positions.vertices[2];
@@ -333,33 +373,48 @@ export function addVoxelQuad(
     QuadVerticies.BottomRight,
     vector4ShaderData
   );
+  // Use quad-average AO and quad-average normal.y for all 4 metadata vertices
+  // so that dveMetadata.x (topExposure), .y (slope), and .z (cavity) are
+  // uniform across the quad and do not produce a diagonal interpolation seam.
+  const _avgQuadAO =
+    (worldAO.vertices[QuadVerticies.TopRight] +
+      worldAO.vertices[QuadVerticies.TopLeft] +
+      worldAO.vertices[QuadVerticies.BottomLeft] +
+      worldAO.vertices[QuadVerticies.BottomRight]) /
+    4;
+  const _avgNY =
+    (topRightNor.y + topLeftNor.y + bottomLeftNor.y + bottomRightNor.y) / 4;
   const topRightMetadata = createSurfaceMetadata(
     topRightNor,
-    worldAO.vertices[QuadVerticies.TopRight],
+    _avgQuadAO,
     posY,
     shelter,
-    vector1Metadata
+    vector1Metadata,
+    _avgNY
   );
   const topLeftMetadata = createSurfaceMetadata(
     topLeftNor,
-    worldAO.vertices[QuadVerticies.TopLeft],
+    _avgQuadAO,
     posY,
     shelter,
-    vector2Metadata
+    vector2Metadata,
+    _avgNY
   );
   const bottomLeftMetadata = createSurfaceMetadata(
     bottomLeftNor,
-    worldAO.vertices[QuadVerticies.BottomLeft],
+    _avgQuadAO,
     posY,
     shelter,
-    vector3Metadata
+    vector3Metadata,
+    _avgNY
   );
   const bottomRightMetadata = createSurfaceMetadata(
     bottomRightNor,
-    worldAO.vertices[QuadVerticies.BottomRight],
+    _avgQuadAO,
     posY,
     shelter,
-    vector4Metadata
+    vector4Metadata,
+    _avgNY
   );
   const indices = targetBuilder.mesh!.indices;
   let indIndex = targetBuilder.mesh.indicieCount;
@@ -425,42 +480,88 @@ export function addVoxelQuad(
 
   indIndex = targetBuilder.mesh.indicieCount;
 
+  // Voxel Flip Rule: choose the quad diagonal that minimises the AO/light
+  // gradient discontinuity.  Each diagonal is the shared edge of its two
+  // triangles; placing it where the brightness difference is smallest hides
+  // the interpolation seam that would otherwise appear as a visible band.
+  //
+  // Primary diagonal:  V0(TopRight) — V2(BottomLeft)   → triangles [0,1,2] [2,3,0]
+  // Alternate diagonal: V1(TopLeft) — V3(BottomRight)  → triangles [0,1,3] [1,2,3]
+  //
+  // We score each vertex as (ao * 4096 + light) so AO differences dominate
+  // while light breaks ties.  If the alternate pair sum > primary pair sum,
+  // flipping the diagonal places the "warmer" edge as the shared seam, which
+  // matches the gradient direction and makes the seam invisible.
+  const _aoTR = worldAO.vertices[QuadVerticies.TopRight];
+  const _aoTL = worldAO.vertices[QuadVerticies.TopLeft];
+  const _aoBL = worldAO.vertices[QuadVerticies.BottomLeft];
+  const _aoBR = worldAO.vertices[QuadVerticies.BottomRight];
+  const _lTR  = worldLight.vertices[QuadVerticies.TopRight];
+  const _lTL  = worldLight.vertices[QuadVerticies.TopLeft];
+  const _lBL  = worldLight.vertices[QuadVerticies.BottomLeft];
+  const _lBR  = worldLight.vertices[QuadVerticies.BottomRight];
+  const _bTR  = _aoTR * 4096 + _lTR;
+  const _bTL  = _aoTL * 4096 + _lTL;
+  const _bBL  = _aoBL * 4096 + _lBL;
+  const _bBR  = _aoBR * 4096 + _lBR;
+  // flip = true → use alternate diagonal (V1-V3)
+  const _flipDiag = (_bTL + _bBR) > (_bTR + _bBL);
+
   if (!quad.doubleSided) {
-    let index = baseIndex;
-    indices.setIndex(indIndex).currentArray[indices.curentIndex] = index;
-    indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] =
-      index + 1;
-    indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] =
-      index + 3;
-    indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
+    const index = baseIndex;
+    if (!_flipDiag) {
+      // Primary: [0,1,2], [2,3,0]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
+    } else {
+      // Alternate: [0,1,3], [1,2,3]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index + 3;
+    }
     targetBuilder.mesh.addVerticies(4, 6);
   } else {
-    let index = baseIndex;
-    indices.setIndex(indIndex).currentArray[indices.curentIndex] = index;
-    indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] =
-      index + 1;
-    indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] =
-      index + 3;
-    indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
-    indIndex += 6;
-    indices.setIndex(indIndex).currentArray[indices.curentIndex] = index;
-    indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] =
-      index + 3;
-    indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] =
-      index + 2;
-    indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] =
-      index + 1;
-    indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
+    const index = baseIndex;
+    if (!_flipDiag) {
+      // Primary front: [0,1,2], [2,3,0]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
+      indIndex += 6;
+      // Primary back (reversed winding): [0,3,2], [2,1,0]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index;
+    } else {
+      // Alternate front: [0,1,3], [1,2,3]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 2;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index + 3;
+      indIndex += 6;
+      // Alternate back (reversed winding): [0,3,1], [1,3,2]
+      indices.setIndex(indIndex    ).currentArray[indices.curentIndex] = index;
+      indices.setIndex(indIndex + 1).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 2).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 3).currentArray[indices.curentIndex] = index + 1;
+      indices.setIndex(indIndex + 4).currentArray[indices.curentIndex] = index + 3;
+      indices.setIndex(indIndex + 5).currentArray[indices.curentIndex] = index + 2;
+    }
     targetBuilder.mesh.addVerticies(4, 12);
   }
 

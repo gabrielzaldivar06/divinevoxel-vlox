@@ -11,6 +11,9 @@ export class TickQueue {
   constructor(public dimension: DimensionSegment) {}
   ticks = new Map<number, VoxelTickUpdate[]>();
 
+  /** Maximum tick updates processed per run() call to prevent frame stalls. */
+  static maxUpdatesPerRun = 512;
+
   getTotalTicks() {
     const tick = this.dimension.getTick();
 
@@ -58,14 +61,18 @@ export class TickQueue {
 
     if (!updates) return false;
 
-    while (updates.length) {
+    let budget = TickQueue.maxUpdatesPerRun;
+    while (updates.length && budget > 0) {
       const update = updates.shift()!;
       const type = VoxelTickUpdateRegister.getUpdateType(update.type);
       type.run(this.dimension.simulation, update);
+      budget--;
     }
 
-    this.ticks.delete(tick);
-    tickArrayPool.push(updates);
+    if (updates.length === 0) {
+      this.ticks.delete(tick);
+      tickArrayPool.push(updates);
+    }
 
     return true;
   }

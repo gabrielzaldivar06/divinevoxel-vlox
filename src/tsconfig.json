@@ -16,5 +16,6 @@
     "allowJs": true,
     "checkJs": false,
     "resolveJsonModule": true
-  }
+  },
+  "exclude": ["External/**"]
 }

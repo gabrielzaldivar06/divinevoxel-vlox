@@ -50,26 +50,31 @@ export class VoxelBehavior {
   needUpdate(simulation: DimensionSimulation, x: number, y: number, z: number) {
     if (!this.data.needUpdate) return;
     const voxel = simulation.getVoxelForUpdate(x, y, z);
+    if (!voxel) return;
     return this.data.needUpdate(simulation, voxel, x, y, z);
   }
   onInteract(simulation: DimensionSimulation, x: number, y: number, z: number) {
     if (!this.data.onInteract) return;
     const voxel = simulation.getVoxelForUpdate(x, y, z);
+    if (!voxel) return;
     this.data.onInteract(simulation, voxel, x, y, z);
   }
   onPaint(simulation: DimensionSimulation, x: number, y: number, z: number) {
     if (!this.data.onPaint) return;
     const voxel = simulation.getVoxelForUpdate(x, y, z);
+    if (!voxel) return;
     this.data.onPaint(simulation, voxel, x, y, z);
   }
   onErase(simulation: DimensionSimulation, x: number, y: number, z: number) {
     if (!this.data.onErase) return;
     const voxel = simulation.getVoxelForUpdate(x, y, z);
+    if (!voxel) return;
     this.data.onErase(simulation, voxel, x, y, z);
   }
   onTick(simulation: DimensionSimulation, x: number, y: number, z: number) {
     if (!this.data.onTick) return;
     const voxel = simulation.getVoxelForUpdate(x, y, z);
+    if (!voxel) return;
     this.data.onTick(simulation, voxel, x, y, z);
   }
 }

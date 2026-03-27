@@ -15,6 +15,7 @@ export class VoxelTickUpdateType<Data extends any = null> {
 
   run(runData: DimensionSimulation, update: VoxelTickUpdate<Data>) {
     const voxel = runData.getVoxelForUpdate(update.x, update.y, update.z);
+    if (!voxel || voxel.isAir()) return;
     this.data.run(runData, voxel, update);
   }
 }

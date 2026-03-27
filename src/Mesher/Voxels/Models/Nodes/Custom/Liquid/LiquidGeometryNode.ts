@@ -186,7 +186,7 @@ export class LiquidGeometryNode extends GeoemtryNode<
       builder.updateBounds(quad.bounds);
     }
 
-    if (this.isExposed(VoxelFaces.North, voxelId)) {
+    if (upFaceExposed && this.isExposed(VoxelFaces.North, voxelId)) {
       added = true;
 
       const quad = Quads[VoxelFaces.North];
@@ -225,7 +225,7 @@ export class LiquidGeometryNode extends GeoemtryNode<
       builder.updateBounds(quad.bounds);
     }
 
-    if (this.isExposed(VoxelFaces.South, voxelId)) {
+    if (upFaceExposed && this.isExposed(VoxelFaces.South, voxelId)) {
       added = true;
 
       const quad = Quads[VoxelFaces.South];
@@ -264,7 +264,7 @@ export class LiquidGeometryNode extends GeoemtryNode<
       builder.updateBounds(quad.bounds);
     }
 
-    if (this.isExposed(VoxelFaces.East, voxelId)) {
+    if (upFaceExposed && this.isExposed(VoxelFaces.East, voxelId)) {
       added = true;
 
       const quad = Quads[VoxelFaces.East];
@@ -304,7 +304,7 @@ export class LiquidGeometryNode extends GeoemtryNode<
       builder.updateBounds(quad.bounds);
     }
 
-    if (this.isExposed(VoxelFaces.West, voxelId)) {
+    if (upFaceExposed && this.isExposed(VoxelFaces.West, voxelId)) {
       added = true;
 
       const quad = Quads[VoxelFaces.West];

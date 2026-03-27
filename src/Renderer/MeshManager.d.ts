@@ -1,4 +1,4 @@
-import type { SetSectionMeshTask } from "../Mesher/Types/Mesher.types";
+import type { SetSectionMeshTask, WaterSectionUpdateTask } from "../Mesher/Types/Mesher.types";
 import { LocationData } from "../Math/index.js";
 import { DVESectionMeshes } from "./Classes/DVESectionMeshes";
 import { SectorMesh } from "./Classes/SectorMesh";
@@ -7,7 +7,7 @@ export type SectionMeshCallback = (sectorKey: string, meshes: {
     materialId: string;
     vertices: Float32Array;
     sectionOrigin: [number, number, number];
-}[]) => void;
+}[], waterUpdate?: WaterSectionUpdateTask) => void;
 export type SectorRemovedCallback = (sectorKey: string) => void;
 export type VoxelErasedCallback = (dimensionId: number, x: number, y: number, z: number, voxelId: number) => void;
 export declare class MeshManager {

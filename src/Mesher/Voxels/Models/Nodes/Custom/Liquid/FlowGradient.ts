@@ -158,8 +158,8 @@ export function getFlowGradient(
     const checkSet = checkSets[vertex];
 
     let finalLevel = cl;
-
     let zerCount = 0;
+    let hasAbove = false;
 
     for (let i = 0; i < 6; i += 2) {
       const cx = checkSet[i] + tool.position.x;
@@ -170,23 +170,33 @@ export function getFlowGradient(
       if (aboveLevel > 0) {
         flowStates.vertices[vertex] = 9;
         finalLevel = 9;
+        hasAbove = true;
         break;
       }
       const level = getLevel(tool, cx, tool.position.y, cz);
 
       if (level == -1) {
         zerCount++;
+        continue;
       }
 
       if (finalLevel < level) {
         finalLevel = level;
       }
     }
-    if (((finalLevel < 7 && finalLevel > 3) || cs == 1) && zerCount >= 2) {
-      finalLevel = 3;
-    }
 
-    flowStates.vertices[vertex] = finalLevel;
+    if (!hasAbove) {
+      // Shoreline taper: each open/air neighbor position lowers this corner's height.
+      // The zerCount > 0 guard already ensures only edge cells are affected;
+      // open-ocean cells with all same-liquid neighbors keep zerCount = 0 and stay flat.
+      if (zerCount > 0 && cs !== 1) {
+        finalLevel = Math.max(0, finalLevel - zerCount * 2);
+      }
+      if (cs == 1 && zerCount >= 2) {
+        finalLevel = Math.max(2, finalLevel - 1);
+      }
+      flowStates.vertices[vertex] = finalLevel;
+    }
   }
 
   return flowStates;

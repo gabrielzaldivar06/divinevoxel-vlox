@@ -673,7 +673,7 @@ export function MeshSectionSurfaceNets(
     meshed.push(mesher);
   }
 
-  const compactMesh = CompactVoxelSectionMesh(location, meshed, transfers);
+  const compactMesh = CompactVoxelSectionMesh(location, meshed, waterGrid, transfers);
 
   for (let i = 0; i < meshed.length; i++) {
     meshed[i].clear();
