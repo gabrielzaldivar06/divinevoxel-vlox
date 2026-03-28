@@ -1,10 +1,9 @@
 import type { WaterColumnSample, WaterSectionGrid } from "../Types/WaterTypes";
 import type { WaterPatchStitchContext } from "./WaterSurfaceMesher.types";
 
-// Lowered to 1×1 so even single-cell editor water goes through the
-// continuous-patch mesher and avoids the "animated blue squares" appearance.
-const MIN_LARGE_PATCH_SPAN = 1;
-const MIN_LARGE_PATCH_AREA = 1;
+const MIN_LARGE_PATCH_SPAN = 4;
+const MIN_LARGE_PATCH_AREA = 20;
+const MIN_LARGE_BODY_SIGNAL = 0.42;
 
 function sampleLargeBodyField(
   grid: WaterSectionGrid,
@@ -34,12 +33,12 @@ function isLargeOpenSurfacePatch(
   const spanX = patchState.surfaceMaxX - patchState.surfaceMinX + 1;
   const spanZ = patchState.surfaceMaxZ - patchState.surfaceMinZ + 1;
   const area = spanX * spanZ;
-  // largeBodySignal gate removed — any sized openSurface patch with valid patchId
-  // qualifies for the continuous-patch mesher.
+  const largeBodySignal = sampleLargeBodyField(grid, lx, lz);
   return (
     spanX >= MIN_LARGE_PATCH_SPAN &&
     spanZ >= MIN_LARGE_PATCH_SPAN &&
-    area >= MIN_LARGE_PATCH_AREA
+    area >= MIN_LARGE_PATCH_AREA &&
+    largeBodySignal >= MIN_LARGE_BODY_SIGNAL
   );
 }
 
@@ -49,7 +48,11 @@ export function collectLargeOpenSurfacePatchIds(grid: WaterSectionGrid) {
   for (let lx = 0; lx < grid.boundsX; lx++) {
     for (let lz = 0; lz < grid.boundsZ; lz++) {
       const column = grid.columns[lx * grid.boundsZ + lz];
-      if (!column.filled || !isLargeOpenSurfacePatch(grid, column, lx, lz)) {
+      if (
+        !column.filled ||
+        !column.renderState.standardSurfaceVisible ||
+        !isLargeOpenSurfacePatch(grid, column, lx, lz)
+      ) {
         continue;
       }
       patchIds.add(column.renderState.patchState.patchId);

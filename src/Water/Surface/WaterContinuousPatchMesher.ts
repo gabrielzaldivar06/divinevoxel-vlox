@@ -492,7 +492,7 @@ function collectPreparedContinuousPatchCells(grid: WaterSectionGrid, options: Wa
   for (let lx = 0; lx < grid.boundsX; lx++) {
     for (let lz = 0; lz < bz; lz++) {
       const column = grid.columns[lx * bz + lz];
-      if (!column.filled) continue;
+      if (!column.filled || !column.renderState.standardSurfaceVisible) continue;
       const regime = getContinuousPatchRegime(column);
       if (!regime) continue;
       if (!isContinuousLargePatchOwnedColumn(grid, column, lx, lz, patchIds)) continue;

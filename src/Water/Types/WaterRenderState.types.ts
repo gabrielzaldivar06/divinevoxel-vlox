@@ -35,6 +35,8 @@ export interface WaterRenderState {
   waveDirectionX: number;
   waveDirectionZ: number;
   antiPeriodicityDomain: number;
+  standardSurfaceVisible: boolean;
+  transientSurfaceActive: boolean;
   edgeState: WaterEdgeState;
   patchState: WaterPatchState;
 }

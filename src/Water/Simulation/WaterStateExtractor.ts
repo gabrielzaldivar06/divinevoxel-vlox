@@ -123,6 +123,8 @@ function createWaterRenderState(): WaterRenderState {
     waveDirectionX: 0,
     waveDirectionZ: 0,
     antiPeriodicityDomain: 0,
+    standardSurfaceVisible: true,
+    transientSurfaceActive: false,
     edgeState: createWaterEdgeState(),
     patchState: createWaterPatchState(),
   };
@@ -277,6 +279,8 @@ function resetRenderState(renderState: WaterRenderState) {
   renderState.waveDirectionX = 0;
   renderState.waveDirectionZ = 0;
   renderState.antiPeriodicityDomain = 0;
+  renderState.standardSurfaceVisible = true;
+  renderState.transientSurfaceActive = false;
   resetEdgeState(renderState.edgeState);
   resetPatchState(renderState.patchState);
 }
@@ -383,6 +387,8 @@ function copyRenderState(target: WaterRenderState, source: WaterRenderState) {
   target.waveDirectionX = source.waveDirectionX;
   target.waveDirectionZ = source.waveDirectionZ;
   target.antiPeriodicityDomain = source.antiPeriodicityDomain;
+  target.standardSurfaceVisible = source.standardSurfaceVisible;
+  target.transientSurfaceActive = source.transientSurfaceActive;
   copyEdgeState(target.edgeState, source.edgeState);
   copyPatchState(target.patchState, source.patchState);
 }
