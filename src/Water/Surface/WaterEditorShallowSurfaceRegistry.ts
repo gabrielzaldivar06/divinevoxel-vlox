@@ -292,7 +292,9 @@ export function updateEditorShallowSurfaceSection(
     snap.boundsX = boundsX;
     snap.boundsZ = boundsZ;
     snap.updatedAt = now;
-    snap.gpuData = gpuData;
+    if (gpuData) {
+      snap.gpuData = gpuData;
+    }
   }
 
   // Refresh per-record summary for this section
