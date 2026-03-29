@@ -15,6 +15,10 @@ export type ActiveEditorShallowSurfaceRecord = EditorShallowSurfaceRecord & {
   connected: boolean;
   handoff: number;
   remaining: number;
+  /** Optional world-space bottom height, populated by the renderer from GPU data. */
+  bottomHeight?: number;
+  /** Optional water depth at this record, populated by the renderer from GPU data. */
+  depth?: number;
 };
 
 const MAX_EDITOR_SHALLOW_SURFACE_RECORDS = 128;
@@ -227,4 +231,119 @@ export function markEditorShallowSurfaceConnectedByLargeBody(
 
 export function clearEditorShallowSurfaceRegistry() {
   records.length = 0;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Section-level registry — used by DVEEditorShallowSectionRenderer
+// and DVEBabylonRenderer to track per-section GPU data snapshots.
+// ─────────────────────────────────────────────────────────────────
+
+export type ActiveEditorShallowSurfaceSectionSnapshot = {
+  key: string;
+  originX: number;
+  originZ: number;
+  boundsX: number;
+  boundsZ: number;
+  updatedAt: number;
+  records: ActiveEditorShallowSurfaceRecord[];
+  recordCount: number;
+  totalStrength: number;
+  totalDepth: number;
+  totalRemaining: number;
+  maxHandoff: number;
+  gpuData: {
+    columnBuffer: Float32Array;
+    columnStride: number;
+    columnMetadata: Uint32Array;
+  } | null;
+};
+
+const sectionSnapshots = new Map<string, ActiveEditorShallowSurfaceSectionSnapshot>();
+
+/** Update (or create) the section-level snapshot for a given section. */
+export function updateEditorShallowSurfaceSection(
+  originX: number,
+  originZ: number,
+  boundsX: number,
+  boundsZ: number,
+  gpuData: ActiveEditorShallowSurfaceSectionSnapshot["gpuData"],
+) {
+  const key = `${originX}_${originZ}`;
+  let snap = sectionSnapshots.get(key);
+  const now = nowSeconds();
+  if (!snap) {
+    snap = {
+      key,
+      originX,
+      originZ,
+      boundsX,
+      boundsZ,
+      updatedAt: now,
+      records: [],
+      recordCount: 0,
+      totalStrength: 0,
+      totalDepth: 0,
+      totalRemaining: 0,
+      maxHandoff: 0,
+      gpuData,
+    };
+    sectionSnapshots.set(key, snap);
+  } else {
+    snap.boundsX = boundsX;
+    snap.boundsZ = boundsZ;
+    snap.updatedAt = now;
+    snap.gpuData = gpuData;
+  }
+
+  // Refresh per-record summary for this section
+  snap.records = [];
+  snap.recordCount = 0;
+  snap.totalStrength = 0;
+  snap.totalDepth = 0;
+  snap.totalRemaining = 0;
+  snap.maxHandoff = 0;
+
+  pruneExpired(now);
+  for (const record of records) {
+    const lx = record.x - originX;
+    const lz = record.z - originZ;
+    if (lx < -2 || lx > boundsX + 1 || lz < -2 || lz > boundsZ + 1) continue;
+    const remaining = getRecordEnvelope(record, now);
+    if (remaining <= 0) continue;
+    const age = Math.max(0, now - record.bornAt);
+    const connected = record.connectedAt > 0;
+    const handoff = connected ? clamp01((now - record.connectedAt) / HANDOFF_DURATION) : 0;
+    const activeRecord: ActiveEditorShallowSurfaceRecord = {
+      ...record,
+      age,
+      normalizedAge: clamp01(age / Math.max(0.0001, record.lingerDuration)),
+      connected,
+      handoff,
+      remaining,
+    };
+    snap.records.push(activeRecord);
+    snap.recordCount++;
+    snap.totalStrength += record.strength * remaining;
+    snap.totalRemaining += remaining;
+    snap.maxHandoff = Math.max(snap.maxHandoff, handoff);
+  }
+}
+
+/** Remove a section snapshot (called when the voxel section is removed). */
+export function removeEditorShallowSurfaceSection(originX: number, originZ: number) {
+  sectionSnapshots.delete(`${originX}_${originZ}`);
+}
+
+/** Returns all currently tracked section snapshots (for renderer consumption). */
+export function getEditorShallowSurfaceSectionSnapshots(): ActiveEditorShallowSurfaceSectionSnapshot[] {
+  return [...sectionSnapshots.values()];
+}
+
+/**
+ * Advance the shallow surface layer time. Call once per frame with delta-seconds.
+ * Currently prunes expired records; future phases can add wave-state stepping here.
+ */
+export function advanceEditorShallowSurfaceLayer(dt: number) {
+  void dt; // reserved for future animation state
+  pruneExpired();
 }
