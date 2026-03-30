@@ -1,5 +1,8 @@
 import { RenderedMaterials } from "../../Mesher/Voxels/Models/RenderedMaterials";
-import type { WaterColumnSample, WaterSectionGrid } from "../Types/WaterTypes";
+import type {
+  ContinuousSurfaceColumnSource,
+  ContinuousSurfaceSectionSource,
+} from "./WaterContinuousSurfaceSource.types";
 import {
   collectLargeOpenSurfacePatchIds,
   createContinuousLargePatchStitchContext,
@@ -13,15 +16,19 @@ import type {
   WaterSurfaceMesherOptions,
   WaterSurfaceMesherProfile,
   WaterSurfaceMesherRegime,
+  WaterSurfaceMesherStrategy,
   WaterSurfaceSpline,
   WaterSurfaceVertexPayload,
   WaterVertexContext,
 } from "./WaterSurfaceMesher.types";
 import { WATER_UNIFORM_SUBDIVISIONS } from "./WaterSurfaceMesher.types";
-import { USE_GPU_WATER } from "./WaterSurfaceMesher";
+
+function resolveMesherStrategy(options: WaterSurfaceMesherOptions | undefined): WaterSurfaceMesherStrategy {
+  return options?.mesherStrategy ?? "gpu";
+}
 
 type ContinuousPatchCellRenderData = {
-  column: WaterColumnSample;
+  column: ContinuousSurfaceColumnSource;
   heightNorm: number;
   fillFactor: number;
   shoreDistance: number;
@@ -63,33 +70,39 @@ type PreparedContinuousPatchCell = {
   prepared: ContinuousPatchCellRenderData;
 };
 
+export type ContinuousLargePatchRenderSnapshot = {
+  patchIds: Set<number>;
+  patchCells: Map<number, PreparedContinuousPatchCell[]>;
+  renderableCellKeys: Set<string>;
+};
+
 export type ContinuousPatchMesherPrimitives = {
   resolveWaterTexture: (voxelId: number) => number;
   computeOpenEdgeFactor: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     lx: number,
     lz: number,
     stitchContext?: WaterPatchStitchContext,
   ) => number;
-  getWaterMesherDirection: (column: WaterColumnSample) => [number, number];
+  getWaterMesherDirection: (column: ContinuousSurfaceColumnSource) => [number, number];
   computePackedWaterClassValue: (
-    grid: WaterSectionGrid,
-    column: WaterColumnSample,
+    grid: ContinuousSurfaceSectionSource,
+    column: ContinuousSurfaceColumnSource,
     lx: number,
     lz: number,
   ) => number;
   sampleCornerLocalSurfaceY: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     vertexX: number,
     vertexZ: number,
     fallbackY: number,
     stitchContext?: WaterPatchStitchContext,
   ) => number;
   applyCornerShorelineInset: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     lx: number,
     lz: number,
-    column: WaterColumnSample,
+    column: ContinuousSurfaceColumnSource,
     openEdgeFactor: number,
     topNE: WaterPoint,
     topNW: WaterPoint,
@@ -104,7 +117,7 @@ export type ContinuousPatchMesherPrimitives = {
     stableSurfaceHeight: number;
   };
   createWaterSurfaceSpline: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     lx: number,
     lz: number,
     fallbackY: number,
@@ -115,18 +128,18 @@ export type ContinuousPatchMesherPrimitives = {
     stitchContext?: WaterPatchStitchContext,
   ) => WaterSurfaceSpline;
   createWaterVertexPayload: (
-    column: WaterColumnSample,
+    column: ContinuousSurfaceColumnSource,
     stableSurfaceHeight: number,
   ) => WaterSurfaceVertexPayload;
   sampleCornerPayload: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     cornerX: number,
     cornerZ: number,
     fallback: WaterSurfaceVertexPayload,
     stitchContext?: WaterPatchStitchContext,
   ) => WaterSurfaceVertexPayload;
   createWaterVertexContext: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     vertexX: number,
     vertexZ: number,
     fillFactor: number,
@@ -145,7 +158,7 @@ export type ContinuousPatchMesherPrimitives = {
     topSE: WaterPoint,
   ) => number;
   createWaterMesherProfile: (
-    column: WaterColumnSample,
+    column: ContinuousSurfaceColumnSource,
     regime: WaterSurfaceMesherRegime,
   ) => WaterSurfaceMesherProfile;
   sampleInterpolatedPoint: (
@@ -181,32 +194,32 @@ export type ContinuousPatchMesherPrimitives = {
     forcePrimaryDiagonal?: boolean,
   ) => void;
   getFilledColumn: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     lx: number,
     lz: number,
-  ) => WaterColumnSample | null;
+  ) => ContinuousSurfaceColumnSource | null;
   getColumnSeamBaseLocalY: (
-    grid: WaterSectionGrid,
-    col: WaterColumnSample,
+    grid: ContinuousSurfaceSectionSource,
+    col: ContinuousSurfaceColumnSource,
     fillFactor: number,
     shoreDist: number,
     openEdgeFactor: number,
   ) => number;
   sampleCornerSeamBaseLocalY: (
-    grid: WaterSectionGrid,
+    grid: ContinuousSurfaceSectionSource,
     vertexX: number,
     vertexZ: number,
     fallbackBaseY: number,
     stitchContext?: WaterPatchStitchContext,
   ) => number;
   getSupportLayerBands: (
-    grid: WaterSectionGrid,
-    col: WaterColumnSample,
+    grid: ContinuousSurfaceSectionSource,
+    col: ContinuousSurfaceColumnSource,
     baseY: number,
   ) => number[];
   shouldUseLayeredSeams: (
-    grid: WaterSectionGrid,
-    col: WaterColumnSample,
+    grid: ContinuousSurfaceSectionSource,
+    col: ContinuousSurfaceColumnSource,
     supportBands: number[],
     fillFactor: number,
     openEdgeFactor: number,
@@ -253,7 +266,7 @@ export type ContinuousPatchMesherPrimitives = {
     baseA: number,
     baseB: number,
     baseNext: number,
-    col: WaterColumnSample,
+    col: ContinuousSurfaceColumnSource,
     subdivisions: number,
     outwardX: number,
     outwardZ: number,
@@ -285,9 +298,9 @@ export type ContinuousPatchMesherPrimitives = {
 };
 
 function prepareContinuousPatchCell(
-  grid: WaterSectionGrid,
+  grid: ContinuousSurfaceSectionSource,
   regime: WaterSurfaceMesherRegime,
-  column: WaterColumnSample,
+  column: ContinuousSurfaceColumnSource,
   lx: number,
   lz: number,
   options: WaterSurfaceMesherOptions | undefined,
@@ -447,9 +460,12 @@ function emitContinuousPatchTopSurface(mesh: any, waterTexture: number, lx: numb
   }
 }
 
-function emitContinuousPatchSeams(mesh: any, grid: WaterSectionGrid, waterTexture: number, prepared: ContinuousPatchCellRenderData, lx: number, lz: number, stitchContext: WaterPatchStitchContext, primitives: ContinuousPatchMesherPrimitives) {
-  if (USE_GPU_WATER) return;
+function emitContinuousPatchSeams(mesh: any, grid: ContinuousSurfaceSectionSource, waterTexture: number, prepared: ContinuousPatchCellRenderData, lx: number, lz: number, stitchContext: WaterPatchStitchContext, primitives: ContinuousPatchMesherPrimitives, options: WaterSurfaceMesherOptions | undefined) {
   const col = prepared.column;
+  const useDropSeams =
+    col.renderState.edgeState.edgeType === "drop" ||
+    col.renderState.edgeState.dropHeight > 0.7;
+  if (resolveMesherStrategy(options) === "gpu" && !useDropSeams) return;
   const baseY = primitives.getColumnSeamBaseLocalY(grid, col, prepared.fillFactor, prepared.shoreDistance, prepared.openEdgeFactor);
   const seamBaseNE = primitives.sampleCornerSeamBaseLocalY(grid, lx + 1, lz, baseY, stitchContext);
   const seamBaseNW = primitives.sampleCornerSeamBaseLocalY(grid, lx, lz, baseY, stitchContext);
@@ -457,7 +473,6 @@ function emitContinuousPatchSeams(mesh: any, grid: WaterSectionGrid, waterTextur
   const seamBaseSE = primitives.sampleCornerSeamBaseLocalY(grid, lx + 1, lz + 1, baseY, stitchContext);
   const supportBands = primitives.getSupportLayerBands(grid, col, baseY);
   const useLayeredSeams = primitives.shouldUseLayeredSeams(grid, col, supportBands, prepared.fillFactor, prepared.openEdgeFactor, prepared.cellSlope, baseY);
-  const useDropSeams = col.renderState.edgeState.edgeType === "drop" && col.renderState.edgeState.dropHeight > 0.7;
   const { topNE, topNW, topSW, topSE } = prepared.adjustedTop;
   const topContexts = prepared.vertexContexts;
 
@@ -480,13 +495,13 @@ function emitContinuousPatchSeams(mesh: any, grid: WaterSectionGrid, waterTextur
   emitEdge(!!primitives.getFilledColumn(grid, lx, lz + 1), topContexts[2], topContexts[3], topNW, topSW, topSE, topNE, seamBaseNW, seamBaseSW, seamBaseSE, seamBaseNE, 0, 1);
 }
 
-function getContinuousPatchRegime(column: WaterColumnSample) {
+function getContinuousPatchRegime(column: ContinuousSurfaceColumnSource) {
   const regime = classifyWaterMesherRegime(column);
   if (regime === "openSurface" || regime === "shoreBand") return regime;
   return null;
 }
 
-function collectPreparedContinuousPatchCells(grid: WaterSectionGrid, options: WaterSurfaceMesherOptions | undefined, primitives: ContinuousPatchMesherPrimitives, patchIds: Set<number>) {
+function collectPreparedContinuousPatchCells(grid: ContinuousSurfaceSectionSource, options: WaterSurfaceMesherOptions | undefined, primitives: ContinuousPatchMesherPrimitives, patchIds: Set<number>) {
   const patchCells = new Map<number, PreparedContinuousPatchCell[]>();
   const bz = grid.boundsZ;
   for (let lx = 0; lx < grid.boundsX; lx++) {
@@ -497,7 +512,7 @@ function collectPreparedContinuousPatchCells(grid: WaterSectionGrid, options: Wa
       if (!regime) continue;
       if (!isContinuousLargePatchOwnedColumn(grid, column, lx, lz, patchIds)) continue;
       const anchorPatchId = getContinuousLargePatchAnchorPatchId(grid, column, lx, lz, patchIds);
-      if (anchorPatchId <= 0) continue;
+      if (anchorPatchId === 0) continue;
       const stitchContext = createContinuousLargePatchStitchContext(grid, column, lx, lz, patchIds);
       const prepared = prepareContinuousPatchCell(grid, regime, column, lx, lz, options, stitchContext, primitives);
       if (!prepared) continue;
@@ -509,36 +524,74 @@ function collectPreparedContinuousPatchCells(grid: WaterSectionGrid, options: Wa
   return patchCells;
 }
 
-export function collectContinuousLargePatchRenderableIds(
-  grid: WaterSectionGrid,
+function buildContinuousLargePatchRenderSnapshot(
+  grid: ContinuousSurfaceSectionSource,
   options: WaterSurfaceMesherOptions | undefined,
   primitives: ContinuousPatchMesherPrimitives,
-) {
-  const largePatchIds = collectLargeOpenSurfacePatchIds(grid);
-  if (!largePatchIds.size) return largePatchIds;
+  patchIds: Set<number>,
+): ContinuousLargePatchRenderSnapshot {
+  const patchCells = patchIds.size
+    ? collectPreparedContinuousPatchCells(grid, options, primitives, patchIds)
+    : new Map<number, PreparedContinuousPatchCell[]>();
+  const renderableCellKeys = new Set<string>();
+  for (const cells of patchCells.values()) {
+    for (const cell of cells) {
+      renderableCellKeys.add(`${cell.lx}_${cell.lz}`);
+    }
+  }
+  return {
+    patchIds,
+    patchCells,
+    renderableCellKeys,
+  };
+}
 
-  const patchCells = collectPreparedContinuousPatchCells(
+export function collectContinuousLargePatchRenderSnapshot(
+  grid: ContinuousSurfaceSectionSource,
+  options: WaterSurfaceMesherOptions | undefined,
+  primitives: ContinuousPatchMesherPrimitives,
+): ContinuousLargePatchRenderSnapshot {
+  return buildContinuousLargePatchRenderSnapshot(
     grid,
     options,
     primitives,
-    largePatchIds,
+    collectLargeOpenSurfacePatchIds(grid),
   );
-
-  return new Set<number>(patchCells.keys());
 }
 
-export function meshContinuousLargePatchSurface(grid: WaterSectionGrid, options: WaterSurfaceMesherOptions | undefined, primitives: ContinuousPatchMesherPrimitives): boolean {
+export function collectContinuousLargePatchRenderableIds(
+  grid: ContinuousSurfaceSectionSource,
+  options: WaterSurfaceMesherOptions | undefined,
+  primitives: ContinuousPatchMesherPrimitives,
+) {
+  const snapshot = collectContinuousLargePatchRenderSnapshot(grid, options, primitives);
+  return snapshot.patchIds.size ? new Set<number>(snapshot.patchCells.keys()) : snapshot.patchIds;
+}
+
+export function collectContinuousLargePatchRenderableCellKeys(
+  grid: ContinuousSurfaceSectionSource,
+  options: WaterSurfaceMesherOptions | undefined,
+  primitives: ContinuousPatchMesherPrimitives,
+) {
+  return collectContinuousLargePatchRenderSnapshot(grid, options, primitives).renderableCellKeys;
+}
+
+export function meshContinuousLargePatchSurface(
+  grid: ContinuousSurfaceSectionSource,
+  options: WaterSurfaceMesherOptions | undefined,
+  primitives: ContinuousPatchMesherPrimitives,
+  snapshot?: ContinuousLargePatchRenderSnapshot,
+): boolean {
   if (grid.filledCount === 0) return false;
-  const largePatchIds = collectLargeOpenSurfacePatchIds(grid);
-  if (!largePatchIds.size) return false;
+  const resolvedSnapshot = snapshot ?? collectContinuousLargePatchRenderSnapshot(grid, options, primitives);
+  if (!resolvedSnapshot.patchIds.size) return false;
   const builder = RenderedMaterials.meshersMap.get("dve_liquid");
   if (!builder) return false;
-  const patchCells = collectPreparedContinuousPatchCells(grid, options, primitives, largePatchIds);
-  if (!patchCells.size) return false;
+  if (!resolvedSnapshot.patchCells.size) return false;
 
   const mesh = builder.mesh;
   let emitted = false;
-  for (const cells of patchCells.values()) {
+  for (const cells of resolvedSnapshot.patchCells.values()) {
     cells.sort((a, b) => (a.lx - b.lx) || (a.lz - b.lz));
     const waterTexture = primitives.resolveWaterTexture(cells[0].prepared.column.voxelId);
     for (const cell of cells) {
@@ -546,7 +599,7 @@ export function meshContinuousLargePatchSurface(grid: WaterSectionGrid, options:
       emitted = true;
     }
     for (const cell of cells) {
-      emitContinuousPatchSeams(mesh, grid, waterTexture, cell.prepared, cell.lx, cell.lz, cell.stitchContext, primitives);
+      emitContinuousPatchSeams(mesh, grid, waterTexture, cell.prepared, cell.lx, cell.lz, cell.stitchContext, primitives, options);
     }
   }
   return emitted;

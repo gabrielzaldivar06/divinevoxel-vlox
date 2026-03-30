@@ -5,11 +5,15 @@ import {
   WaterSurfaceClass,
 } from "../Types/WaterTypes";
 import type { WaterEdgeType } from "../Types/WaterEdgeState.types";
-import type { WaterPatchState, WaterPatchType } from "../Types/WaterPatchState.types";
+import type { WaterPatchState } from "../Types/WaterPatchState.types";
+import {
+  encodeWaterPatchTypeId,
+  packWaterPatchMetadata,
+  WATER_PATCH_SUMMARY_STRIDE,
+} from "../Types/WaterPatchSummaryContract";
 
 const COLUMN_STRIDE = 8;
 const PARTICLE_SEED_STRIDE = 8;
-const PATCH_SUMMARY_STRIDE = 12;
 const UNKNOWN_SHORE_DISTANCE = 0xff;
 
 function createWaterSectionGPUData(): WaterSectionGPUData {
@@ -28,7 +32,7 @@ function createWaterSectionGPUData(): WaterSectionGPUData {
     largeBodyField: new Float32Array(0),
     largeBodyFieldSize: 0,
     patchSummaryBuffer: new Float32Array(0),
-    patchSummaryStride: PATCH_SUMMARY_STRIDE,
+    patchSummaryStride: WATER_PATCH_SUMMARY_STRIDE,
     patchSummaryCount: 0,
     patchMetadata: new Uint32Array(0),
     columnPatchIndex: new Uint16Array(0),
@@ -64,21 +68,6 @@ function getWaterClassId(waterClass: WaterSurfaceClass) {
   }
 }
 
-function getPatchTypeId(patchType: WaterPatchType) {
-  switch (patchType) {
-    case "shoreBand":
-      return 1;
-    case "channelRibbon":
-      return 2;
-    case "dropFace":
-      return 3;
-    case "enclosedPatch":
-      return 4;
-    default:
-      return 0;
-  }
-}
-
 function getEdgeTypeId(edgeType: WaterEdgeType) {
   switch (edgeType) {
     case "shore":
@@ -96,14 +85,6 @@ function getEdgeTypeId(edgeType: WaterEdgeType) {
   }
 }
 
-function packPatchMetadata(patchState: WaterPatchState) {
-  return (
-    (getPatchTypeId(patchState.patchType) & 0x7) |
-    ((patchState.connectivityMask & 0xf) << 3) |
-    ((Math.max(0, Math.min(0xffff, patchState.waterBodyId)) & 0xffff) << 8)
-  ) >>> 0;
-}
-
 function packColumnMetadata(column: WaterColumnSample) {
   const shoreDistance =
     column.shoreDistance < 0
@@ -114,7 +95,7 @@ function packColumnMetadata(column: WaterColumnSample) {
     ((column.level & 0x7) << 1) |
     ((column.levelState & 0xf) << 4) |
     ((getWaterClassId(column.waterClass) & 0x3) << 8) |
-    ((getPatchTypeId(column.renderState.patchState.patchType) & 0x7) << 10) |
+    ((encodeWaterPatchTypeId(column.renderState.patchState.patchType) & 0x7) << 10) |
     ((getEdgeTypeId(column.renderState.edgeState.edgeType) & 0x7) << 13) |
     ((shoreDistance & 0xff) << 16) |
     ((Math.min(0xff, column.supportDepth) & 0xff) << 24)
@@ -245,15 +226,15 @@ function fillPatchSummaryBuffer(grid: WaterSectionGrid, gpuData: WaterSectionGPU
 
   gpuData.patchSummaryBuffer = ensureFloatArrayCapacity(
     gpuData.patchSummaryBuffer,
-    patchStates.length * PATCH_SUMMARY_STRIDE,
+    patchStates.length * WATER_PATCH_SUMMARY_STRIDE,
   );
   gpuData.patchMetadata = ensureUintArrayCapacity(gpuData.patchMetadata, patchStates.length);
-  gpuData.patchSummaryStride = PATCH_SUMMARY_STRIDE;
+  gpuData.patchSummaryStride = WATER_PATCH_SUMMARY_STRIDE;
   gpuData.patchSummaryCount = patchStates.length;
 
   for (let index = 0; index < patchStates.length; index++) {
     const patchState = patchStates[index];
-    const baseIndex = index * PATCH_SUMMARY_STRIDE;
+    const baseIndex = index * WATER_PATCH_SUMMARY_STRIDE;
     gpuData.patchSummaryBuffer[baseIndex] = patchState.surfaceMinX;
     gpuData.patchSummaryBuffer[baseIndex + 1] = patchState.surfaceMinZ;
     gpuData.patchSummaryBuffer[baseIndex + 2] = patchState.surfaceMaxX;
@@ -266,7 +247,7 @@ function fillPatchSummaryBuffer(grid: WaterSectionGrid, gpuData: WaterSectionGPU
     gpuData.patchSummaryBuffer[baseIndex + 9] = patchState.dominantWaveDirectionZ;
     gpuData.patchSummaryBuffer[baseIndex + 10] = patchState.shoreInfluence;
     gpuData.patchSummaryBuffer[baseIndex + 11] = patchState.antiPeriodicitySeed;
-    gpuData.patchMetadata[index] = packPatchMetadata(patchState);
+    gpuData.patchMetadata[index] = packWaterPatchMetadata(patchState);
   }
 }
 

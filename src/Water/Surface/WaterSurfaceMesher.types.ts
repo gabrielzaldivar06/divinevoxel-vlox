@@ -1,9 +1,12 @@
 import { WaterColumnSample } from "../Types/WaterTypes";
 import { VoxelMeshVertexConstants } from "../../Mesher/Voxels/Geometry/VoxelMeshVertexStructCursor";
 
+export type WaterSurfaceMesherStrategy = "cpu" | "gpu";
+
 export type WaterSurfaceMesherOptions = {
   minSurfaceY?: number;
   maxSurfaceY?: number;
+  mesherStrategy?: WaterSurfaceMesherStrategy;
 };
 
 export type WaterPatchStitchContext = {

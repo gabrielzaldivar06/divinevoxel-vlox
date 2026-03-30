@@ -1,3 +1,8 @@
+import type {
+  WaterColumnAuthority,
+  WaterOwnershipDomain,
+} from "../Contracts/WaterSemanticContract.js";
+
 /**
  * ShallowWaterLayer — Fase 1
  *
@@ -13,8 +18,10 @@
 export interface ShallowColumnState {
   /** Whether this column has active shallow water. */
   active: boolean;
-  /** Water thickness in world units [0, ~1]. 0 = dry. */
+  /** Water depth in world units [0, ~1]. 0 = dry. */
   thickness: number;
+  /** Solid floor Y (world space) used as the local bed for this column. */
+  bedY: number;
   /** Surface Y (world space) of the shallow water top. */
   surfaceY: number;
   /** Horizontal spread velocity, x direction (column units per second). */
@@ -34,6 +41,16 @@ export interface ShallowColumnState {
   emitterId: number;
   /** Whether this column is in the handoff zone (thickness >= handoff threshold). */
   handoffPending: boolean;
+  /** Which water domain currently owns this column semantically. */
+  ownershipDomain: WaterOwnershipDomain;
+  /** Confidence of the last ownership resolution applied to this column. */
+  ownershipConfidence: number;
+  /** Consecutive ticks spent in the current ownership domain. */
+  ownershipTicks: number;
+  /** Most recent shallow tick that resolved this column's ownership. */
+  lastResolvedTick: number;
+  /** Best-known authority that introduced or most recently claimed this column. */
+  authority: WaterColumnAuthority;
 }
 
 /**
@@ -52,7 +69,10 @@ export interface ShallowWaterSectionGrid {
   columns: ShallowColumnState[];
   /** Seconds since last full tick. */
   lastTickDt: number;
-  /** World Y of the dominant terrain surface for this section (for surfaceY anchor). */
+  /**
+   * World Y fallback used to bootstrap new columns before per-column bed sampling exists.
+   * This is no longer the authoritative shallow floor for active columns.
+   */
   terrainY: number;
 }
 
@@ -111,6 +131,7 @@ export function createEmptyShallowColumn(): ShallowColumnState {
   return {
     active: false,
     thickness: 0,
+    bedY: 0,
     surfaceY: 0,
     spreadVX: 0,
     spreadVZ: 0,
@@ -119,5 +140,10 @@ export function createEmptyShallowColumn(): ShallowColumnState {
     age: 0,
     emitterId: 0,
     handoffPending: false,
+    ownershipDomain: "none",
+    ownershipConfidence: 0,
+    ownershipTicks: 0,
+    lastResolvedTick: 0,
+    authority: "bootstrap",
   };
 }

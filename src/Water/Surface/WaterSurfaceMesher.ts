@@ -7,13 +7,17 @@ import { GeometryLUT } from "../../Voxels/Data/GeometryLUT";
 import { EngineSettings } from "../../Settings/EngineSettings";
 import {
   collectLargeOpenSurfacePatchIds,
+  createContinuousLargePatchStitchContext,
   createLargeOpenSurfacePatchStitchContext,
+  getContinuousLargePatchAnchorPatchId,
   isLargeOpenSurfacePatchColumn,
   isLegacyOpenSurfacePatchColumn,
 } from "./WaterPatchMeshSystem";
 import {
-  collectContinuousLargePatchRenderableIds,
+  collectContinuousLargePatchRenderSnapshot,
+  collectContinuousLargePatchRenderableCellKeys,
   meshContinuousLargePatchSurface,
+  type ContinuousLargePatchRenderSnapshot,
   type ContinuousPatchMesherPrimitives,
 } from "./WaterContinuousPatchMesher";
 import {
@@ -173,7 +177,8 @@ function isCompatibleWithStitchContext(
   const patchState = col.renderState.patchState;
   if (
     patchState.patchType !== "openSurface" &&
-    patchState.patchType !== "enclosedPatch"
+    patchState.patchType !== "enclosedPatch" &&
+    patchState.patchType !== "shoreBand"
   ) {
     return false;
   }
@@ -2633,22 +2638,24 @@ export function meshOpenSurfaceWaterByPatchSystem(
   return meshWaterSurfaceSubset(
     grid,
     "openSurface",
-    (column) =>
+    (column, lx, lz) =>
       classifyWaterMesherRegime(column) === "openSurface" &&
-      isLargeOpenSurfacePatchColumn(column, largePatchIds),
+      isLargeOpenSurfacePatchColumn(grid, column, lx, lz, largePatchIds),
     options,
-    (column) => createLargeOpenSurfacePatchStitchContext(column),
+    (column, lx, lz) => createContinuousLargePatchStitchContext(grid, column, lx, lz, largePatchIds),
   );
 }
 
 export function meshContinuousLargePatchWater(
   grid: WaterSectionGrid,
   options?: WaterSurfaceMesherOptions,
+  continuousSnapshot?: ContinuousLargePatchRenderSnapshot,
 ): boolean {
   const r = meshContinuousLargePatchSurface(
     grid,
     options,
     continuousPatchMesherPrimitives,
+    continuousSnapshot,
   );
   return r;
 }
@@ -2656,16 +2663,29 @@ export function meshContinuousLargePatchWater(
 export function meshOpenSurfaceWaterLegacyFallback(
   grid: WaterSectionGrid,
   options?: WaterSurfaceMesherOptions,
+  continuousSnapshot?: ContinuousLargePatchRenderSnapshot,
 ): boolean {
-  const largePatchIds =
-    EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
-      ? collectContinuousLargePatchRenderableIds(
+  const continuousOwnershipPatchIds =
+    continuousSnapshot
+      ? continuousSnapshot.patchIds
+      : EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
+      ? collectLargeOpenSurfacePatchIds(grid)
+      : null;
+  const continuousRenderableCellKeys =
+    continuousSnapshot
+      ? continuousSnapshot.renderableCellKeys
+      : EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
+      ? collectContinuousLargePatchRenderableCellKeys(
           grid,
           options,
           continuousPatchMesherPrimitives,
         )
-      : collectLargeOpenSurfacePatchIds(grid);
-  if (!largePatchIds.size) {
+      : null;
+  const largePatchIds =
+    continuousRenderableCellKeys === null
+      ? collectLargeOpenSurfacePatchIds(grid)
+      : null;
+  if ((continuousRenderableCellKeys && !continuousRenderableCellKeys.size) || (!continuousRenderableCellKeys && !largePatchIds?.size)) {
     const r = meshOpenSurfaceWater(grid, options);
 
     return r;
@@ -2674,10 +2694,22 @@ export function meshOpenSurfaceWaterLegacyFallback(
   const r = meshWaterSurfaceSubset(
     grid,
     "openSurface",
-    (column) =>
+    (column, lx, lz) =>
       classifyWaterMesherRegime(column) === "openSurface" &&
-      isLegacyOpenSurfacePatchColumn(column, largePatchIds),
+      (continuousRenderableCellKeys
+        ? !continuousRenderableCellKeys.has(`${lx}_${lz}`)
+        : isLegacyOpenSurfacePatchColumn(grid, column, lx, lz, largePatchIds!)),
     options,
+    continuousRenderableCellKeys && continuousOwnershipPatchIds
+      ? (column, lx, lz) =>
+          createContinuousLargePatchStitchContext(
+            grid,
+            column,
+            lx,
+            lz,
+            continuousOwnershipPatchIds,
+          )
+      : undefined,
   );
 
   return r;
@@ -2705,37 +2737,62 @@ export function meshShoreBandWaterByPatchSystem(
   return meshWaterSurfaceSubset(
     grid,
     "shoreBand",
-    (column) =>
+    (column, lx, lz) =>
       classifyWaterMesherRegime(column) === "shoreBand" &&
-      isLargeOpenSurfacePatchColumn(column, largePatchIds),
+      getContinuousLargePatchAnchorPatchId(grid, column, lx, lz, largePatchIds) > 0,
     options,
-    (column) => createLargeOpenSurfacePatchStitchContext(column),
+    (column, lx, lz) => createContinuousLargePatchStitchContext(grid, column, lx, lz, largePatchIds),
   );
 }
 
 export function meshShoreBandWaterLegacyFallback(
   grid: WaterSectionGrid,
   options?: WaterSurfaceMesherOptions,
+  continuousSnapshot?: ContinuousLargePatchRenderSnapshot,
 ): boolean {
-  const largePatchIds =
-    EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
-      ? collectContinuousLargePatchRenderableIds(
+  const continuousOwnershipPatchIds =
+    continuousSnapshot
+      ? continuousSnapshot.patchIds
+      : EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
+      ? collectLargeOpenSurfacePatchIds(grid)
+      : null;
+  const continuousRenderableCellKeys =
+    continuousSnapshot
+      ? continuousSnapshot.renderableCellKeys
+      : EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
+      ? collectContinuousLargePatchRenderableCellKeys(
           grid,
           options,
           continuousPatchMesherPrimitives,
         )
-      : collectLargeOpenSurfacePatchIds(grid);
-  if (!largePatchIds.size) {
+      : null;
+  const largePatchIds =
+    continuousRenderableCellKeys === null
+      ? collectLargeOpenSurfacePatchIds(grid)
+      : null;
+  if ((continuousRenderableCellKeys && !continuousRenderableCellKeys.size) || (!continuousRenderableCellKeys && !largePatchIds?.size)) {
     return meshShoreBandWater(grid, options);
   }
 
   return meshWaterSurfaceSubset(
     grid,
     "shoreBand",
-    (column) =>
+    (column, lx, lz) =>
       classifyWaterMesherRegime(column) === "shoreBand" &&
-      isLegacyOpenSurfacePatchColumn(column, largePatchIds),
+      (continuousRenderableCellKeys
+        ? !continuousRenderableCellKeys.has(`${lx}_${lz}`)
+        : isLegacyOpenSurfacePatchColumn(grid, column, lx, lz, largePatchIds!)),
     options,
+    continuousRenderableCellKeys && continuousOwnershipPatchIds
+      ? (column, lx, lz) =>
+          createContinuousLargePatchStitchContext(
+            grid,
+            column,
+            lx,
+            lz,
+            continuousOwnershipPatchIds,
+          )
+      : undefined,
   );
 }
 
@@ -2779,7 +2836,20 @@ export function meshWaterSurfaceComposer(
   grid: WaterSectionGrid,
   options?: WaterSurfaceMesherOptions,
 ): boolean {
-  return runWaterSurfaceComposer(grid, options, waterSurfaceComposerDispatch);
+  const continuousSnapshot =
+    EngineSettings.settings.water.largeWaterVisibleMode === "continuous-patch"
+      ? collectContinuousLargePatchRenderSnapshot(
+          grid,
+          options,
+          continuousPatchMesherPrimitives,
+        )
+      : undefined;
+
+  return runWaterSurfaceComposer(
+    grid,
+    options,
+    createWaterSurfaceComposerDispatch(continuousSnapshot),
+  );
 }
 
 const continuousPatchMesherPrimitives: ContinuousPatchMesherPrimitives = {
@@ -2844,6 +2914,24 @@ const waterSurfaceComposerDispatch: WaterSurfaceComposerDispatch = {
   meshChannelRibbonWater,
   meshWallContactWater,
 };
+
+function createWaterSurfaceComposerDispatch(
+  continuousSnapshot?: ContinuousLargePatchRenderSnapshot,
+): WaterSurfaceComposerDispatch {
+  if (!continuousSnapshot) {
+    return waterSurfaceComposerDispatch;
+  }
+
+  return {
+    ...waterSurfaceComposerDispatch,
+    meshContinuousLargePatchWater: (grid, options) =>
+      meshContinuousLargePatchWater(grid, options, continuousSnapshot),
+    meshOpenSurfaceWaterLegacyFallback: (grid, options) =>
+      meshOpenSurfaceWaterLegacyFallback(grid, options, continuousSnapshot),
+    meshShoreBandWaterLegacyFallback: (grid, options) =>
+      meshShoreBandWaterLegacyFallback(grid, options, continuousSnapshot),
+  };
+}
 
 function emitWaterQuad(
   mesh: any,
