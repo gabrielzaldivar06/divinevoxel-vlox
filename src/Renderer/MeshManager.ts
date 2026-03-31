@@ -26,6 +26,13 @@ export type VoxelErasedCallback = (
   voxelId: number
 ) => void;
 
+export type VoxelPaintedCallback = (
+  dimensionId: number,
+  x: number,
+  y: number,
+  z: number,
+) => void;
+
 export class MeshManager {
   static _sectorPool: SectorMesh[] = [];
   static _sectionPool: SectionMesh[] = [];
@@ -35,6 +42,7 @@ export class MeshManager {
   static onSectionUpdated: SectionMeshCallback | null = null;
   static onSectorRemoved: SectorRemovedCallback | null = null;
   static onVoxelErased: VoxelErasedCallback | null = null;
+  static onVoxelPainted: VoxelPaintedCallback | null = null;
 
   static updateSection(data: SetSectionMeshTask) {
     compacted.setData(data.meshBuffer);

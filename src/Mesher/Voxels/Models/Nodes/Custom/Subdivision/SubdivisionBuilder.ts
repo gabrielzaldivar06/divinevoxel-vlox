@@ -919,9 +919,18 @@ export function getPullConfig(voxelId: number, stringId: string): PullConfig {
  * Highly isolated blocks (≥4 air faces, edgeBoundary > 0.8) get 5×5.
  */
 export function getSubdivisionLevel(edgeBoundary: number): number {
-  if (edgeBoundary > 0.8) return 5;  // 5×5: highly isolated blocks (≥4 air faces)
-  if (edgeBoundary > 0.45) return 4; // 4×4: corner/edge voxels with multiple air faces
-  return 3; // 3×3: standard exposed face (4 interior + 8 edge-mid vertices)
+  const terrain = EngineSettings.settings.terrain;
+  const baseLevel = Math.max(
+    2,
+    Math.min(Math.round(terrain.topologyBaseSubdivisionLevel || 3), 6),
+  );
+  const edgeBoost = Math.max(
+    0,
+    Math.min(Math.round(terrain.topologyEdgeSubdivisionBoost || 0), 3),
+  );
+  if (edgeBoundary > 0.8) return Math.min(baseLevel + edgeBoost, 6);
+  if (edgeBoundary > 0.45) return Math.min(baseLevel + Math.min(edgeBoost, 1), 6);
+  return baseLevel;
 }
 
 /**

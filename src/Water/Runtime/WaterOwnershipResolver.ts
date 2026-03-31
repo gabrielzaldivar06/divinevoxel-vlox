@@ -201,6 +201,8 @@ export class WaterOwnershipResolver {
   ): WaterOwnershipColumnDecision {
     const shallowActive = !!shallow?.active && shallow.thickness > 0.0001;
     const continuousActive = !!continuous?.active && continuous.depth > 0.0001;
+    const shallowGraceTicks = shallowActive ? shallow?.handoffGraceTicks ?? 0 : 0;
+    const continuousGraceTicks = continuousActive ? continuous?.handoffGraceTicks ?? 0 : 0;
 
     if (!shallowActive && !continuousActive) {
       return {
@@ -208,6 +210,37 @@ export class WaterOwnershipResolver {
         confidence: 1,
         contested: false,
       };
+    }
+
+    if (shallowGraceTicks > 0 || continuousGraceTicks > 0) {
+      if (continuousGraceTicks > shallowGraceTicks) {
+        return {
+          domain: "continuous",
+          confidence: 1,
+          contested: shallowActive,
+        };
+      }
+      if (shallowGraceTicks > continuousGraceTicks) {
+        return {
+          domain: "shallow",
+          confidence: 1,
+          contested: continuousActive,
+        };
+      }
+      if (continuousActive && continuous?.authority !== "bootstrap") {
+        return {
+          domain: "continuous",
+          confidence: 1,
+          contested: shallowActive,
+        };
+      }
+      if (shallowActive) {
+        return {
+          domain: "shallow",
+          confidence: 1,
+          contested: continuousActive,
+        };
+      }
     }
 
     if (continuousActive && continuous?.ownershipLocked) {

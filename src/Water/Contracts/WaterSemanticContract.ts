@@ -18,4 +18,11 @@ export type WaterColumnAuthority =
   | "spill-handoff"
   | "rain";
 
-export type ShallowHandoffResult = "accepted" | "deferred" | "rejected";
+export type WaterHandoffDisposition = "accepted" | "deferred" | "rejected";
+
+export type ShallowHandoffResult = WaterHandoffDisposition;
+
+export interface WaterHandoffTransferResult {
+  acceptedMass: number;
+  disposition: WaterHandoffDisposition;
+}

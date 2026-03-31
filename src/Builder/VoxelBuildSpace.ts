@@ -244,6 +244,14 @@ export class VoxelBuildSpace {
         [0, ...update.position],
         PaintVoxelData.ToRaw(update.voxel),
       ]);
+      if (MeshManager.onVoxelPainted) {
+        MeshManager.onVoxelPainted(
+          0,
+          update.position[0],
+          update.position[1],
+          update.position[2],
+        );
+      }
     },
     "erase-voxel": async (update) => {
       const erasedVoxelId = (await this.DVER.threads.world.runTaskAsync(

@@ -36,6 +36,11 @@ export class VoxelModelBuilder {
   transitionBuilder: VoxelModelBuilder | null = null;
   /**The current world position */
   position = Vector3Like.Create();
+  /**Optional world-space sampling anchor for derived shading data on stitched surfaces. */
+  surfaceSamplePosition = Vector3Like.Create();
+  /**Average world-space surface height for metadata baking when sample override is active. */
+  surfaceSampleHeight = 0;
+  useSurfaceSamplePosition = false;
   /**The current local origin  */
   origin = Vector3Like.Create();
 
@@ -173,6 +178,8 @@ export class VoxelModelBuilder {
 
   clear() {
     this.vars.reset();
+    this.useSurfaceSamplePosition = false;
+    this.surfaceSampleHeight = 0;
     this.mesh.clear();
     return this;
   }

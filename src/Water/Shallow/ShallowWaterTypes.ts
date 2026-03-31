@@ -51,6 +51,164 @@ export interface ShallowColumnState {
   lastResolvedTick: number;
   /** Best-known authority that introduced or most recently claimed this column. */
   authority: WaterColumnAuthority;
+  /**
+   * Short ownership hold after an accepted handoff so the runtime does not
+   * immediately flip the column back to the previous domain on the next tick.
+   * This is semantic only; it never creates or destroys mass.
+   */
+  handoffGraceTicks: number;
+}
+
+/**
+ * Stable, render-facing shallow column state used by the film / edge-splat
+ * builders. This is derived from ShallowColumnState and never owns simulation.
+ */
+export interface ShallowVisualColumnState {
+  active: boolean;
+  patchId: number;
+  patchTotalMass: number;
+  patchArea: number;
+  patchActiveArea: number;
+  patchAverageThickness: number;
+  patchMaxThickness: number;
+  patchConnectivity: number;
+  patchCompactness: number;
+  patchBoundaryRatio: number;
+  patchHandoffReady: boolean;
+  localNeighborCount: number;
+  localCore: number;
+  thickness: number;
+  bedY: number;
+  surfaceY: number;
+  visualSurfaceY: number;
+  filmThickness: number;
+  filmOpacity: number;
+  spreadVX: number;
+  spreadVZ: number;
+  flowX: number;
+  flowZ: number;
+  flowSpeed: number;
+  settled: number;
+  adhesion: number;
+  age: number;
+  shoreDist: number;
+  coverage: number;
+  edgeStrength: number;
+  foam: number;
+  wetness: number;
+  breakup: number;
+  microRipple: number;
+  mergeBlend: number;
+  deepBlend: number;
+  handoffBlend: number;
+  emitterId: number;
+  handoffPending: boolean;
+  ownershipDomain: WaterOwnershipDomain;
+  authority: WaterColumnAuthority;
+}
+
+export interface ShallowWaterPatchMetrics {
+  patchId: number;
+  totalMass: number;
+  effectiveTotalMass: number;
+  area: number;
+  activeArea: number;
+  effectiveActiveArea: number;
+  averageThickness: number;
+  maxThickness: number;
+  connectivity: number;
+  compactness: number;
+  boundaryRatio: number;
+  seamContinuity: number;
+  mergeBlend: number;
+  deepBlend: number;
+  handoffBlend: number;
+  handoffReady: boolean;
+}
+
+export interface ShallowWaterPatchColumnMetrics {
+  patchId: number;
+  totalMass: number;
+  effectiveTotalMass: number;
+  area: number;
+  activeArea: number;
+  effectiveActiveArea: number;
+  averageThickness: number;
+  maxThickness: number;
+  connectivity: number;
+  compactness: number;
+  boundaryRatio: number;
+  seamContinuity: number;
+  handoffReady: boolean;
+  localNeighborCount: number;
+  localCore: number;
+  mergeBlend: number;
+  deepBlend: number;
+  handoffBlend: number;
+}
+
+/**
+ * Terrain-conforming film payload for a single shallow-water section.
+ */
+export interface ShallowFilmSectionRenderData {
+  originX: number;
+  originZ: number;
+  sizeX: number;
+  sizeZ: number;
+  terrainY: number;
+  lastTickDt: number;
+  columns: ShallowVisualColumnState[];
+  activeColumnCount: number;
+}
+
+/**
+ * Single edge splat / surfel used to shade flow boundaries, shoreline breakup,
+ * foam bands, and other narrow-band shallow features.
+ */
+export interface ShallowEdgeSplat {
+  x: number;
+  y: number;
+  z: number;
+  normalX: number;
+  normalY: number;
+  normalZ: number;
+  dirX: number;
+  dirZ: number;
+  radius: number;
+  stretch: number;
+  alpha: number;
+  foam: number;
+  age: number;
+  thickness: number;
+  shoreDist: number;
+  flowSpeed: number;
+  settling: number;
+  breakup: number;
+  mergeBlend: number;
+  deepBlend: number;
+  handoffBlend: number;
+  emitterId: number;
+}
+
+/**
+ * Derived edge field for one shallow-water section.
+ */
+export interface ShallowEdgeFieldSectionRenderData {
+  originX: number;
+  originZ: number;
+  sizeX: number;
+  sizeZ: number;
+  splats: ShallowEdgeSplat[];
+  activeSplatCount: number;
+}
+
+/**
+ * Stable shallow render snapshot containing the terrain film and edge field.
+ * The two sub-objects are derived from the authoritative shallow section grid.
+ */
+export interface ShallowRenderSectionSnapshot {
+  film: ShallowFilmSectionRenderData;
+  edgeField: ShallowEdgeFieldSectionRenderData;
 }
 
 /**
@@ -94,10 +252,10 @@ export interface ShallowWaterConfig {
 
 export const DEFAULT_SHALLOW_WATER_CONFIG: ShallowWaterConfig = {
   handoffThickness: 0.75,
-  evaporationRate: 0.004,
-  spreadRate: 0.6,
-  settlingRate: 0.3,
-  maxSpreadVelocity: 2.0,
+  evaporationRate: 0.0032,
+  spreadRate: 0.72,
+  settlingRate: 0.24,
+  maxSpreadVelocity: 2.35,
 };
 
 /**
@@ -145,5 +303,6 @@ export function createEmptyShallowColumn(): ShallowColumnState {
     ownershipTicks: 0,
     lastResolvedTick: 0,
     authority: "bootstrap",
+    handoffGraceTicks: 0,
   };
 }

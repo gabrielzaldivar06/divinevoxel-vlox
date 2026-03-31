@@ -17,9 +17,33 @@ const vector2Metadata = Vector4Like.Create();
 const vector3Metadata = Vector4Like.Create();
 const vector4Metadata = Vector4Like.Create();
 const worldContextCache = { x: 0, y: 0, z: 0 };
+const geometrySampleCache = { x: 0, y: 0, z: 0, height: 0 };
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));
+}
+
+function roundToVoxel(value: number) {
+  return Math.floor(value + 0.5);
+}
+
+function getSamplingAnchor(
+  builder: VoxelModelBuilder,
+  averageSurfaceHeight: number,
+) {
+  if (builder.useSurfaceSamplePosition) {
+    geometrySampleCache.x = roundToVoxel(builder.surfaceSamplePosition.x);
+    geometrySampleCache.y = roundToVoxel(builder.surfaceSamplePosition.y);
+    geometrySampleCache.z = roundToVoxel(builder.surfaceSamplePosition.z);
+    geometrySampleCache.height = builder.surfaceSampleHeight;
+    return geometrySampleCache;
+  }
+
+  geometrySampleCache.x = roundToVoxel(builder.position.x);
+  geometrySampleCache.y = roundToVoxel(builder.position.y);
+  geometrySampleCache.z = roundToVoxel(builder.position.z);
+  geometrySampleCache.height = averageSurfaceHeight;
+  return geometrySampleCache;
 }
 
 function computeShelter(
@@ -136,9 +160,6 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   const animData = builder.vars.animation;
   const texture = builder.vars.textureIndex;
   const overlayTextures = builder.vars.overlayTextures;
-  const posY = builder.position.y;
-  const shelter = computeShelter(builder.nVoxel, builder.position.x, builder.position.y, builder.position.z);
-  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z, shelter);
   const topRightPos = tri.positions.vertices[0];
   const topLeftPos = tri.positions.vertices[1];
   const bottomLeftPos = tri.positions.vertices[2];
@@ -146,6 +167,12 @@ export function addVoxelTriangle(builder: VoxelModelBuilder, tri: Triangle) {
   const topRightNor = tri.normals.vertices[0];
   const topLeftNor = tri.normals.vertices[1];
   const bottomLeftNor = tri.normals.vertices[2];
+  const averageWorldY =
+    (topRightPos.y + topLeftPos.y + bottomLeftPos.y) / 3 + origin.y;
+  const sample = getSamplingAnchor(builder, averageWorldY);
+  const posY = sample.height;
+  const shelter = computeShelter(builder.nVoxel, sample.x, sample.y, sample.z);
+  const wctx = computeWorldContext(builder, sample.x, sample.y, sample.z, shelter);
 
   const topRightVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
@@ -310,9 +337,6 @@ export function addVoxelQuad(
   const animData = builder.vars.animation;
   const texture = builder.vars.textureIndex;
   const overlayTextures = builder.vars.overlayTextures;
-  const posY = builder.position.y;
-  const shelter = computeShelter(builder.nVoxel, builder.position.x, builder.position.y, builder.position.z);
-  const wctx = computeWorldContext(builder, builder.position.x, builder.position.y, builder.position.z, shelter);
   const topRightPos = quad.positions.vertices[0];
   const topLeftPos = quad.positions.vertices[1];
   const bottomLeftPos = quad.positions.vertices[2];
@@ -321,6 +345,13 @@ export function addVoxelQuad(
   const topLeftNor = quad.normals.vertices[1];
   const bottomLeftNor = quad.normals.vertices[2];
   const bottomRightNor = quad.normals.vertices[3];
+  const averageWorldY =
+    (topRightPos.y + topLeftPos.y + bottomLeftPos.y + bottomRightPos.y) / 4 +
+    origin.y;
+  const sample = getSamplingAnchor(builder, averageWorldY);
+  const posY = sample.height;
+  const shelter = computeShelter(builder.nVoxel, sample.x, sample.y, sample.z);
+  const wctx = computeWorldContext(builder, sample.x, sample.y, sample.z, shelter);
   const topRightVoxelData = VoxelShaderData.create(
     worldLight.vertices[QuadVerticies.TopRight],
     worldLight.vertices[QuadVerticies.TopLeft],

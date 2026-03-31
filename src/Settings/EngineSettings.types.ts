@@ -96,6 +96,12 @@ export class TerrainSettingsData {
   dissolutionTemporal = false;
   surfaceNets = false;
   surfaceNetsIsoLevel = 8;
+  surfaceNetsTopologyRefinement = true;
+  surfaceNetsSubdivisionLevel = 2;
+  surfaceNetsSmoothingBlend = 0.42;
+  topologyRefinement = false;
+  topologyBaseSubdivisionLevel = 3;
+  topologyEdgeSubdivisionBoost = 2;
   atmosphericSplats = false;
   lodMorph = false;
   /**

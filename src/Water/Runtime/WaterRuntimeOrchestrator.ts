@@ -26,6 +26,7 @@ export interface WaterRuntimeTickHandlers {
   tickShallow?: (dt: number, tick: number) => WaterRuntimePhaseAccounting | void;
   resolveOwnership?: (tick: number) => void;
   performHandoff?: (tick: number) => WaterRuntimePhaseAccounting | void;
+  resolveEvents?: (dt: number, tick: number) => WaterRuntimePhaseAccounting | void;
   updateSpill?: (dt: number, tick: number) => WaterRuntimePhaseAccounting | void;
   extractRenderData?: (tick: number) => void;
   measureMass?: (tick: number) => WaterRuntimeMassSummary;
@@ -124,6 +125,8 @@ export class WaterRuntimeOrchestrator {
     capturePhaseMass("afterResolveOwnership");
     mergePhaseAccounting(accounting, handlers.performHandoff?.(tick));
     capturePhaseMass("afterPerformHandoff");
+    mergePhaseAccounting(accounting, handlers.resolveEvents?.(dt, tick));
+    capturePhaseMass("afterResolveEvents");
     mergePhaseAccounting(accounting, handlers.updateSpill?.(dt, tick));
     capturePhaseMass("afterUpdateSpill");
     handlers.extractRenderData?.(tick);

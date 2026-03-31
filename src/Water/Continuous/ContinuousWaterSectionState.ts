@@ -26,6 +26,9 @@ const MIN_TRANSFER_CONFIDENCE = 0.6;
 const MIN_CONFIDENCE_FLOW_SCALE = 0.2;
 const MIN_LOCKED_FLOW_SCALE = 0.2;
 const MIN_STABLE_OWNERSHIP_TICKS = 3;
+const HANDOFF_GRACE_TICKS = MIN_STABLE_OWNERSHIP_TICKS;
+const UPSTREAM_BIAS_WEIGHT = 0.12;
+const CONFINEMENT_WEIGHT = 0.08;
 const sections = new Map<string, ContinuousWaterSection>();
 let _continuousTick = 0;
 
@@ -129,10 +132,20 @@ function getLockedFlowScale(column: ContinuousWaterColumn) {
 
 function canContinuousColumnHandoff(column: ContinuousWaterColumn) {
   return (
+    column.handoffGraceTicks <= 0 &&
     !column.ownershipLocked &&
     column.ownershipConfidence >= MIN_TRANSFER_CONFIDENCE &&
     column.ownershipTicks >= MIN_STABLE_OWNERSHIP_TICKS
   );
+}
+
+export interface ContinuousWaterSeedOptions {
+  bedY?: number;
+  authority?: ContinuousWaterColumn["authority"];
+  ownershipConfidence?: number;
+  ownershipTicks?: number;
+  ownershipLocked?: boolean;
+  handoffGraceTicks?: number;
 }
 
 function getColumnFlowScale(column: ContinuousWaterColumn) {
@@ -165,6 +178,10 @@ function applyInboundFluxes(
       const x = direction === "west" ? 0 : direction === "east" ? section.sizeX - 1 : i;
       const z = direction === "north" ? 0 : direction === "south" ? section.sizeZ - 1 : i;
       const column = section.columns[colIdx(section.sizeX, x, z)];
+      if (!column.active && Number.isFinite(flux.bedY)) {
+        column.bedY = flux.bedY;
+        column.surfaceY = flux.bedY;
+      }
       column.active = true;
       column.pendingInboundMass += flux.mass;
       column.mass += flux.mass;
@@ -238,8 +255,9 @@ export function addContinuousWaterSeed(
   surfaceY: number,
   depth: number,
   bodyId = 1,
+  options: ContinuousWaterSeedOptions = {},
 ) {
-  if (depth <= 0) return false;
+  if (depth <= 0) return 0;
 
   const sizeX = DEFAULT_SECTION_SIZE;
   const sizeZ = DEFAULT_SECTION_SIZE;
@@ -249,7 +267,12 @@ export function addContinuousWaterSeed(
   const localX = ((worldX % sizeX) + sizeX) % sizeX;
   const localZ = ((worldZ % sizeZ) + sizeZ) % sizeZ;
   const column = section.columns[colIdx(section.sizeX, localX, localZ)];
-  const bedY = surfaceY - depth;
+  const bedY = Number.isFinite(options.bedY) ? (options.bedY as number) : surfaceY - depth;
+  const authority = options.authority ?? "continuous-handoff";
+  const ownershipConfidence = options.ownershipConfidence ?? 1;
+  const ownershipTicks =
+    options.ownershipTicks !== undefined ? Math.max(0, options.ownershipTicks) : null;
+  const handoffGraceTicks = Math.max(0, options.handoffGraceTicks ?? 0);
 
   for (const candidate of section.columns) {
     if (candidate.active) continue;
@@ -258,24 +281,29 @@ export function addContinuousWaterSeed(
     candidate.surfaceY = bedY;
   }
 
+  if (!column.active || !Number.isFinite(column.bedY)) {
+    column.bedY = bedY;
+  }
   column.active = true;
-  column.bedY = bedY;
   column.mass += depth;
   column.depth = column.mass;
   column.surfaceY = column.bedY + column.depth;
   column.pressure = column.depth;
   column.bodyId = Math.max(bodyId, column.bodyId, 1);
   column.openWaterFactor = Math.max(column.openWaterFactor, Math.min(1, column.depth));
-  column.ownershipLocked = false;
+  column.ownershipLocked = options.ownershipLocked ?? false;
   column.turbulence = Math.max(column.turbulence, 0.1);
   column.foamPotential = Math.max(column.foamPotential, 0.1);
   column.handoffPending = false;
   column.ownershipDomain = "continuous";
-  column.ownershipTicks = Math.max(1, column.ownershipTicks);
-  column.authority = "continuous-handoff";
+  column.ownershipConfidence = ownershipConfidence;
+  column.ownershipTicks =
+    ownershipTicks ?? Math.max(1, column.ownershipTicks);
+  column.authority = authority;
   column.lastResolvedTick = _continuousTick;
+  column.handoffGraceTicks = handoffGraceTicks;
   section.topologyVersion += 1;
-  return true;
+  return depth;
 }
 
 export function syncContinuousSectionFromGPUData(
@@ -348,6 +376,83 @@ export function syncContinuousSectionFromGPUData(
 
   section.topologyVersion += 1;
   return section;
+}
+
+/**
+ * Compute upstream bias and confinement-adjusted pressure for every active
+ * column in a section.
+ *
+ * pressure = depth + upstreamBias + confinementFactor
+ *
+ * upstreamBias: weighted average of neighbor pressures that exceed ours,
+ *   scaled to propagate hydraulic "head" from dammed / confined regions.
+ * confinementFactor: fraction of neighbors with equal-or-higher pressure,
+ *   representing how boxed-in the column is.
+ */
+function accumulateSectionPressure(section: ContinuousWaterSection) {
+  const { sizeX, sizeZ, columns } = section;
+
+  for (let z = 0; z < sizeZ; z++) {
+    for (let x = 0; x < sizeX; x++) {
+      const idx = z * sizeX + x;
+      const col = columns[idx];
+      if (!col.active) continue;
+
+      let upstreamSum = 0;
+      let upstreamCount = 0;
+      let confinedCount = 0;
+      let neighborCount = 0;
+
+      for (const [dx, dz] of CARDINAL_STEPS) {
+        const nx = x + dx;
+        const nz = z + dz;
+        if (nx < 0 || nx >= sizeX || nz < 0 || nz >= sizeZ) continue;
+        const neighbor = columns[nz * sizeX + nx];
+        if (!neighbor.active) continue;
+        neighborCount++;
+
+        if (neighbor.depth >= col.depth) {
+          confinedCount++;
+        }
+        if (neighbor.depth > col.depth) {
+          upstreamSum += neighbor.depth - col.depth;
+          upstreamCount++;
+        }
+      }
+
+      const upstreamBias =
+        upstreamCount > 0
+          ? (upstreamSum / upstreamCount) * UPSTREAM_BIAS_WEIGHT
+          : 0;
+      const confinementFactor =
+        neighborCount > 0
+          ? (confinedCount / neighborCount) * col.depth * CONFINEMENT_WEIGHT
+          : 0;
+
+      col.pressure = col.depth + upstreamBias + confinementFactor;
+    }
+  }
+}
+
+/**
+ * Return the cardinal neighbor pressures for a column. Used by the event
+ * resolver to evaluate confinement rules.
+ */
+export function getNeighborPressures(
+  section: ContinuousWaterSection,
+  x: number,
+  z: number,
+): number[] {
+  const result: number[] = [];
+  for (const [dx, dz] of CARDINAL_STEPS) {
+    const nx = x + dx;
+    const nz = z + dz;
+    if (nx < 0 || nx >= section.sizeX || nz < 0 || nz >= section.sizeZ) continue;
+    const neighbor = section.columns[nz * section.sizeX + nx];
+    if (!neighbor.active) continue;
+    result.push(neighbor.pressure);
+  }
+  return result;
 }
 
 export function tickContinuousWater(
@@ -545,6 +650,9 @@ export function tickContinuousWater(
       const column = section.columns[i];
       const x = i % section.sizeX;
       const z = Math.floor(i / section.sizeX);
+      if (column.active && column.handoffGraceTicks > 0) {
+        column.handoffGraceTicks -= 1;
+      }
       if (
         !shouldSimulateContinuousColumn(
           ownershipPreview,
@@ -600,6 +708,9 @@ export function tickContinuousWater(
     }
 
     section.lastTickDt = clampedDt;
+
+    // Second pass: accumulate upstream bias and confinement into pressure.
+    accumulateSectionPressure(section);
 
     if (!section.columns.some((column) => column.active)) {
       sectionsToRemove.push({ key, originX: section.originX, originZ: section.originZ });
@@ -702,8 +813,9 @@ export function performContinuousWaterHandoffs(
           column.depth = column.mass;
           column.surfaceY = column.bedY + column.depth;
           column.pressure = column.depth;
-          column.handoffPending = column.depth > 0.0001 && column.depth < config.demoteDepth;
+          column.handoffPending = false;
           column.ownershipTicks = 0;
+          column.handoffGraceTicks = HANDOFF_GRACE_TICKS;
         }
         didHandoff = true;
       }

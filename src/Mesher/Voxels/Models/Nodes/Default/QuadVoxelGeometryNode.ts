@@ -447,8 +447,12 @@ export class QuadVoxelGometryNode extends GeoemtryNode<
 
     GetTexture(builder, args[ArgIndexes.Texture], this.closestFace, quad);
 
-    // Dissolution subdivision: replace single quad with subdivided grid + vertex pulling
-    if (EngineSettings.settings.terrain.dissolution) {
+    // Global topology refinement can reuse the same subdivided organic geometry path
+    // even when the dissolution look itself is disabled.
+    if (
+      EngineSettings.settings.terrain.dissolution ||
+      EngineSettings.settings.terrain.topologyRefinement
+    ) {
       const stringId = builder.voxel.getStringId();
       if (isSubdivisionCandidate(stringId)) {
         const exposedFaces = computeExposedFaces(builder, this.closestFace);

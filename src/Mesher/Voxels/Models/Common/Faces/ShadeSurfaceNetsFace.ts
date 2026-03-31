@@ -46,9 +46,12 @@ export function ShadeSurfaceNetsFace(
   const foundHash = space.foundHash;
   const noCastAO = space.noCastAO;
   const nVoxel = builder.nVoxel;
-  const posX = builder.position.x;
-  const posY = builder.position.y;
-  const posZ = builder.position.z;
+  const samplePosition = builder.useSurfaceSamplePosition
+    ? builder.surfaceSamplePosition
+    : builder.position;
+  const posX = Math.floor(samplePosition.x + 0.5);
+  const posY = Math.floor(samplePosition.y + 0.5);
+  const posZ = Math.floor(samplePosition.z + 0.5);
 
   const worldLight = builder.vars.light;
   const worldAO = builder.vars.ao;

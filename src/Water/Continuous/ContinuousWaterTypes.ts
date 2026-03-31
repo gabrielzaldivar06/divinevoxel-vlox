@@ -26,6 +26,11 @@ export interface ContinuousWaterColumn {
   ownershipConfidence: number;
   ownershipTicks: number;
   authority: WaterColumnAuthority;
+  /**
+   * Short ownership hold after an accepted handoff so ownership does not
+   * oscillate before the new domain stabilizes.
+   */
+  handoffGraceTicks: number;
 }
 
 export type ContinuousToShallowCallback = (
@@ -89,5 +94,6 @@ export function createEmptyContinuousColumn(): ContinuousWaterColumn {
     ownershipConfidence: 0,
     ownershipTicks: 0,
     authority: "bootstrap",
+    handoffGraceTicks: 0,
   };
 }

@@ -6,13 +6,17 @@ export interface WaterRuntimeInputEvent {
     | "remove-mass"
     | "pressure-impulse"
     | "flow-obstruction"
-    | "emitter-update";
+    | "emitter-update"
+    | "breach"
+    | "gate-control";
   worldX: number;
   worldY: number;
   worldZ: number;
   radius?: number;
   massDelta?: number;
   pressureDelta?: number;
+  gateId?: string;
+  gateOpenness?: number;
 }
 
 const pendingEvents: WaterRuntimeInputEvent[] = [];
