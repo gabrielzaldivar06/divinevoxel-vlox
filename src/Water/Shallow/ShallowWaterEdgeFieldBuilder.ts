@@ -1,3 +1,4 @@
+import type { ShallowGhostColumnSet } from "./ShallowBoundaryFluxRegistry.js";
 import { DEFAULT_SHALLOW_WATER_CONFIG } from "./ShallowWaterTypes";
 import type {
   ShallowEdgeFieldSectionRenderData,
@@ -39,6 +40,40 @@ function getIndex(sizeX: number, x: number, z: number) {
   return z * sizeX + x;
 }
 
+function getGhostColumn(
+  ghosts: ShallowGhostColumnSet | null | undefined,
+  sizeX: number,
+  sizeZ: number,
+  x: number,
+  z: number,
+) {
+  if (!ghosts) return null;
+  if (x < 0 && z >= 0 && z < sizeZ) return ghosts.west[z] ?? null;
+  if (x >= sizeX && z >= 0 && z < sizeZ) return ghosts.east[z] ?? null;
+  if (z < 0 && x >= 0 && x < sizeX) return ghosts.north[x] ?? null;
+  if (z >= sizeZ && x >= 0 && x < sizeX) return ghosts.south[x] ?? null;
+  return null;
+}
+
+function getGhostContinuity(
+  ghosts: ShallowGhostColumnSet | null | undefined,
+  sizeX: number,
+  sizeZ: number,
+  x: number,
+  z: number,
+) {
+  let continuity = 0;
+  const west = getGhostColumn(ghosts, sizeX, sizeZ, x - 1, z);
+  const east = getGhostColumn(ghosts, sizeX, sizeZ, x + 1, z);
+  const north = getGhostColumn(ghosts, sizeX, sizeZ, x, z - 1);
+  const south = getGhostColumn(ghosts, sizeX, sizeZ, x, z + 1);
+  if (west?.active && west.thickness > 0.0001) continuity += 1;
+  if (east?.active && east.thickness > 0.0001) continuity += 1;
+  if (north?.active && north.thickness > 0.0001) continuity += 1;
+  if (south?.active && south.thickness > 0.0001) continuity += 1;
+  return continuity;
+}
+
 function sampleColumn(
   columns: ShallowVisualColumnState[],
   sizeX: number,
@@ -46,8 +81,27 @@ function sampleColumn(
   x: number,
   z: number,
   fallback: ShallowVisualColumnState,
+  ghosts?: ShallowGhostColumnSet | null,
 ) {
   if (x < 0 || z < 0 || x >= sizeX || z >= sizeZ) {
+    const ghost = getGhostColumn(ghosts, sizeX, sizeZ, x, z);
+    if (ghost?.active && ghost.thickness > 0.0001) {
+      return {
+        ...fallback,
+        active: true,
+        thickness: ghost.thickness,
+        bedY: ghost.bedY,
+        surfaceY: ghost.surfaceY,
+        visualSurfaceY: ghost.surfaceY,
+        flowX: 0,
+        flowZ: 0,
+        flowSpeed: Math.hypot(ghost.spreadVX, ghost.spreadVZ),
+        spreadVX: ghost.spreadVX,
+        spreadVZ: ghost.spreadVZ,
+        edgeStrength: 0,
+        shoreDist: SHORE_DISTANCE_MAX,
+      } satisfies ShallowVisualColumnState;
+    }
     return fallback;
   }
   return columns[getIndex(sizeX, x, z)] ?? fallback;
@@ -86,12 +140,13 @@ function buildSplatFromColumn(
   z: number,
   column: ShallowVisualColumnState,
   out: ShallowEdgeSplat,
+  ghosts?: ShallowGhostColumnSet | null,
 ) {
   const fallback = column;
-  const left = sampleColumn(film.columns, film.sizeX, film.sizeZ, x - 1, z, fallback);
-  const right = sampleColumn(film.columns, film.sizeX, film.sizeZ, x + 1, z, fallback);
-  const back = sampleColumn(film.columns, film.sizeX, film.sizeZ, x, z - 1, fallback);
-  const front = sampleColumn(film.columns, film.sizeX, film.sizeZ, x, z + 1, fallback);
+  const left = sampleColumn(film.columns, film.sizeX, film.sizeZ, x - 1, z, fallback, ghosts);
+  const right = sampleColumn(film.columns, film.sizeX, film.sizeZ, x + 1, z, fallback, ghosts);
+  const back = sampleColumn(film.columns, film.sizeX, film.sizeZ, x, z - 1, fallback, ghosts);
+  const front = sampleColumn(film.columns, film.sizeX, film.sizeZ, x, z + 1, fallback, ghosts);
 
   const gradientX = left.visualSurfaceY - right.visualSurfaceY;
   const gradientZ = back.visualSurfaceY - front.visualSurfaceY;
@@ -173,6 +228,7 @@ function buildSplatFromColumn(
 export function buildShallowWaterEdgeFieldSectionRenderData(
   film: ShallowFilmSectionRenderData,
   previous?: ShallowEdgeFieldSectionRenderData,
+  ghosts?: ShallowGhostColumnSet | null,
 ): ShallowEdgeFieldSectionRenderData {
   const columns = film.columns;
   const count = film.sizeX * film.sizeZ;
@@ -191,6 +247,9 @@ export function buildShallowWaterEdgeFieldSectionRenderData(
     for (let x = 0; x < film.sizeX; x++) {
       const index = getIndex(film.sizeX, x, z);
       if (index >= count) continue;
+      if (x === 0 || z === 0 || x === film.sizeX - 1 || z === film.sizeZ - 1) {
+        continue;
+      }
       const column = columns[index];
       if (!column.active || column.coverage <= 0 || column.thickness <= 0.002) continue;
 
@@ -198,19 +257,24 @@ export function buildShallowWaterEdgeFieldSectionRenderData(
       const motion = clamp01(column.flowSpeed / Math.max(0.0001, DEFAULT_SHALLOW_WATER_CONFIG.maxSpreadVelocity));
       const unsettled = 1 - clamp01(column.settled);
       const thinness = 1 - clamp01(column.coverage);
+      const seamContinuity = clamp01(
+        getGhostContinuity(ghosts, film.sizeX, film.sizeZ, x, z) / 2,
+      );
       const rawScore = clamp01(
         shoreFactor * 0.42 +
           column.edgeStrength * 0.24 +
           motion * 0.17 +
           thinness * 0.09 +
           unsettled * 0.08,
-      ) * (1 - column.mergeBlend * 0.24 - column.deepBlend * 0.34 - column.handoffBlend * 0.22);
+      ) *
+        (1 - column.mergeBlend * 0.24 - column.deepBlend * 0.34 - column.handoffBlend * 0.22) *
+        (1 - seamContinuity * 0.85);
 
       if (rawScore < MIN_SPLAT_SCORE) continue;
 
       const splat = splats[activeSplatCount] ?? makeEmptySplat();
       splats[activeSplatCount] = splat;
-      buildSplatFromColumn(film, x, z, column, splat);
+      buildSplatFromColumn(film, x, z, column, splat, ghosts);
       activeSplatCount += 1;
     }
   }

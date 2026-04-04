@@ -111,6 +111,48 @@ export class WaterOwnershipResolver {
     readonly minTicksInDomain = 3,
   ) {}
 
+  private getContinuousColumnAt(
+    continuousSections: ReadonlyMap<string, ContinuousWaterSection>,
+    worldX: number,
+    worldZ: number,
+  ) {
+    const sectionSize = 16;
+    const originX = Math.floor(worldX / sectionSize) * sectionSize;
+    const originZ = Math.floor(worldZ / sectionSize) * sectionSize;
+    const section = continuousSections.get(sectionKey(originX, originZ));
+    if (!section) return undefined;
+    const localX = ((worldX % section.sizeX) + section.sizeX) % section.sizeX;
+    const localZ = ((worldZ % section.sizeZ) + section.sizeZ) % section.sizeZ;
+    return section.columns[getColumnIndex(section.sizeX, localX, localZ)];
+  }
+
+  private hasAdjacentContinuousSupport(
+    continuousSections: ReadonlyMap<string, ContinuousWaterSection>,
+    originX: number,
+    originZ: number,
+    x: number,
+    z: number,
+  ) {
+    const worldX = originX + x;
+    const worldZ = originZ + z;
+    for (const [dx, dz] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+    ] as const) {
+      const column = this.getContinuousColumnAt(
+        continuousSections,
+        worldX + dx,
+        worldZ + dz,
+      );
+      if (!column?.active || column.depth <= 0.0001) continue;
+      if (column.ownershipDomain !== "continuous") continue;
+      return true;
+    }
+    return false;
+  }
+
   private getPreviousResolvedState(
     shallow: ShallowWaterSectionGrid["columns"][number] | undefined,
     continuous: ContinuousWaterSection["columns"][number] | undefined,
@@ -141,6 +183,16 @@ export class WaterOwnershipResolver {
     continuous: ContinuousWaterSection["columns"][number] | undefined,
   ) {
     if (domain === "shallow") {
+      const forcedContinuousTransfer =
+        !!shallow?.active &&
+        shallow.ownershipConfidence >= 0.6 &&
+        shallow.handoffPending &&
+        (shallow.pendingOwnershipDomain ?? shallow.ownershipDomain) === "continuous" &&
+        !!continuous?.active &&
+        continuous.depth > 0.0001;
+      if (forcedContinuousTransfer) {
+        return false;
+      }
       return !!shallow?.active && shallow.thickness > 0.0001;
     }
     if (domain === "continuous") {
@@ -251,8 +303,24 @@ export class WaterOwnershipResolver {
       };
     }
 
+    if (
+      shallowActive &&
+      continuousActive &&
+      shallow!.handoffPending &&
+      (shallow!.pendingOwnershipDomain ?? shallow!.ownershipDomain) === "continuous" &&
+      continuous!.authority !== "bootstrap"
+    ) {
+      return {
+        domain: "continuous",
+        confidence: 0.98,
+        contested: false,
+      };
+    }
+
     if (shallowActive && !continuousActive) {
-      const promoteToContinuous = shallow!.thickness >= this.promoteDepth;
+        const promoteToContinuous =
+          shallow!.handoffPending &&
+          shallow!.thickness >= this.promoteDepth;
       return {
         domain: promoteToContinuous ? "continuous" : "shallow",
         confidence: promoteToContinuous ? 0.9 : Math.min(1, 0.6 + shallow!.thickness),
@@ -468,11 +536,8 @@ export class WaterOwnershipResolver {
           const index = getColumnIndex(section.sizeX, x, z);
           const column = section.columns[index];
           const domain = decodeOwnershipDomain(domains?.[index] ?? OWNERSHIP_NONE);
-          const previousDomain = column.ownershipDomain;
-          column.ownershipDomain = domain;
+          column.pendingOwnershipDomain = domain;
           column.ownershipConfidence = confidence?.[index] ?? 0;
-          column.ownershipTicks =
-            domain === "none" ? 0 : previousDomain === domain ? column.ownershipTicks + 1 : 1;
           column.handoffPending =
             column.active && !column.ownershipLocked && column.ownershipConfidence >= 0.6 && domain === "shallow";
           column.lastResolvedTick = tick;
@@ -490,18 +555,56 @@ export class WaterOwnershipResolver {
           const index = getColumnIndex(section.sizeX, x, z);
           const column = section.columns[index];
           const domain = decodeOwnershipDomain(domains?.[index] ?? OWNERSHIP_NONE);
-          const previousDomain = column.ownershipDomain;
-          column.ownershipDomain = domain;
+          const coastalContinuousClaim =
+            column.active &&
+            column.thickness > 0.0001 &&
+            domain !== "continuous" &&
+            this.hasAdjacentContinuousSupport(
+              continuousSections,
+              section.originX,
+              section.originZ,
+              x,
+              z,
+            );
+          const pendingDomain = coastalContinuousClaim ? "continuous" : domain;
+          column.pendingOwnershipDomain = pendingDomain;
           column.ownershipConfidence = confidence?.[index] ?? 0;
-          column.ownershipTicks =
-            domain === "none" ? 0 : previousDomain === domain ? column.ownershipTicks + 1 : 1;
           column.handoffPending =
-            column.active && column.ownershipConfidence >= 0.6 && domain === "continuous";
+            column.active && column.ownershipConfidence >= 0.6 && pendingDomain === "continuous";
           column.lastResolvedTick = tick;
         }
       }
     }
 
     return summary;
+  }
+
+  finalizeAll(
+    shallowSections: ReadonlyMap<string, ShallowWaterSectionGrid>,
+    continuousSections: ReadonlyMap<string, ContinuousWaterSection>,
+  ) {
+    for (const section of continuousSections.values()) {
+      for (const column of section.columns) {
+        const domain = column.pendingOwnershipDomain;
+        if (!domain) continue;
+        const previousDomain = column.ownershipDomain;
+        column.ownershipDomain = domain;
+        column.ownershipTicks =
+          domain === "none" ? 0 : previousDomain === domain ? column.ownershipTicks + 1 : 1;
+        column.pendingOwnershipDomain = undefined;
+      }
+    }
+
+    for (const section of shallowSections.values()) {
+      for (const column of section.columns) {
+        const domain = column.pendingOwnershipDomain;
+        if (!domain) continue;
+        const previousDomain = column.ownershipDomain;
+        column.ownershipDomain = domain;
+        column.ownershipTicks =
+          domain === "none" ? 0 : previousDomain === domain ? column.ownershipTicks + 1 : 1;
+        column.pendingOwnershipDomain = undefined;
+      }
+    }
   }
 }

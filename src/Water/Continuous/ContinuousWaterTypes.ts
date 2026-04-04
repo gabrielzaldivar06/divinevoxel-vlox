@@ -23,6 +23,7 @@ export interface ContinuousWaterColumn {
   pendingOutboundMass: number;
   lastResolvedTick: number;
   ownershipDomain: WaterOwnershipDomain;
+  pendingOwnershipDomain?: WaterOwnershipDomain;
   ownershipConfidence: number;
   ownershipTicks: number;
   authority: WaterColumnAuthority;
@@ -91,6 +92,7 @@ export function createEmptyContinuousColumn(): ContinuousWaterColumn {
     pendingOutboundMass: 0,
     lastResolvedTick: 0,
     ownershipDomain: "none",
+    pendingOwnershipDomain: "none",
     ownershipConfidence: 0,
     ownershipTicks: 0,
     authority: "bootstrap",

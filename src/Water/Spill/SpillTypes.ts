@@ -2,6 +2,7 @@ import type { WaterRuntimePhaseAccounting } from "../Runtime/WaterRuntimeOrchest
 
 export type SpillSourceDomain = "shallow" | "continuous";
 export type SpillTargetDomain = "shallow" | "continuous";
+export type SpillFxProfile = "default" | "waterball";
 
 export interface SpillEmitter {
   id: number;
@@ -10,6 +11,7 @@ export interface SpillEmitter {
   worldZ: number;
   flowRate: number;
   fallHeight: number;
+  fxProfile: SpillFxProfile;
   sourceSectionKey?: string;
   targetSectionKey?: string;
 }
@@ -24,6 +26,7 @@ export interface SpillTransferRequest {
   mass: number;
   fallHeight?: number;
   travelTimeSeconds?: number;
+  fxProfile?: SpillFxProfile;
   sourceSectionKey?: string;
   targetSectionKey?: string;
 }
@@ -38,8 +41,8 @@ export interface SpillEmitterRuntime extends SpillEmitter {
 }
 
 export interface SpillLandingCallbacks {
-  landToShallow: (worldX: number, worldZ: number, surfaceY: number, mass: number, emitterId: number) => number;
-  landToContinuous: (worldX: number, worldZ: number, surfaceY: number, mass: number, emitterId: number) => number;
+  landToShallow: (worldX: number, worldZ: number, surfaceY: number, mass: number, emitterId: number, emitter: SpillEmitterRuntime) => number;
+  landToContinuous: (worldX: number, worldZ: number, surfaceY: number, mass: number, emitterId: number, emitter: SpillEmitterRuntime) => number;
 }
 
 export interface SpillWaterUpdateSummary {

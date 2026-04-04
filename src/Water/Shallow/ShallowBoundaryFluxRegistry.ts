@@ -353,7 +353,7 @@ export class ShallowBoundaryFluxRegistry {
     return total;
   }
 
-  finalizeTick() {
+  finalizeTick(currentTick?: number) {
     const directions: WaterBoundaryDirection[] = ["north", "south", "east", "west"];
     for (const entry of this.entries.values()) {
       for (const direction of directions) {
@@ -390,7 +390,7 @@ export class ShallowBoundaryFluxRegistry {
         for (let i = 0; i < deferred.length; i++) {
           const flux = deferred[i];
           if (flux.mass <= 0) continue;
-          const deliveryTick = neighbor.lastBoundarySyncTick || flux.tick;
+          const deliveryTick = neighbor.lastBoundarySyncTick || currentTick || flux.tick;
           neighbor.inboundFlux.accumulate(
             targetDirection,
             i,
@@ -407,7 +407,7 @@ export class ShallowBoundaryFluxRegistry {
         for (let i = 0; i < boundary.length; i++) {
           const flux = boundary[i];
           if (flux.mass <= 0) continue;
-          const deliveryTick = neighbor.lastBoundarySyncTick || flux.tick;
+          const deliveryTick = neighbor.lastBoundarySyncTick || currentTick || flux.tick;
           neighbor.inboundFlux.accumulate(
             targetDirection,
             i,

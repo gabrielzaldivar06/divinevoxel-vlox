@@ -43,6 +43,8 @@ export interface ShallowColumnState {
   handoffPending: boolean;
   /** Which water domain currently owns this column semantically. */
   ownershipDomain: WaterOwnershipDomain;
+  /** Domain resolved for this tick, applied after handoff finalization. */
+  pendingOwnershipDomain?: WaterOwnershipDomain;
   /** Confidence of the last ownership resolution applied to this column. */
   ownershipConfidence: number;
   /** Consecutive ticks spent in the current ownership domain. */
@@ -51,6 +53,12 @@ export interface ShallowColumnState {
   lastResolvedTick: number;
   /** Best-known authority that introduced or most recently claimed this column. */
   authority: WaterColumnAuthority;
+  /**
+   * True only for columns explicitly seeded with a terrain-resolved bedY.
+   * Propagated columns must not inherit this, or failed re-sampling can let
+   * derived water survive in unsupported space as if it were a direct seed.
+   */
+  supportPinned: boolean;
   /**
    * Short ownership hold after an accepted handoff so the runtime does not
    * immediately flip the column back to the previous domain on the next tick.
@@ -102,6 +110,11 @@ export interface ShallowVisualColumnState {
   deepBlend: number;
   handoffBlend: number;
   emitterId: number;
+  /**
+   * [0, 1] visual turbidity — increases when water is disturbed/flowing,
+   * decays when settled. Drives murky colour tint and opacity boost in renderer.
+   */
+  turbidity: number;
   handoffPending: boolean;
   ownershipDomain: WaterOwnershipDomain;
   authority: WaterColumnAuthority;
@@ -248,14 +261,20 @@ export interface ShallowWaterConfig {
   settlingRate: number;
   /** Maximum spread velocity (column units per second). */
   maxSpreadVelocity: number;
+  /** Gravitational acceleration for slope-driven flow (SWE "g" term, voxel units/s²). */
+  gravity: number;
+  /** Manning-like bed-friction coefficient. Higher = more drag at high speeds on thin sheets. */
+  frictionCoefficient: number;
 }
 
 export const DEFAULT_SHALLOW_WATER_CONFIG: ShallowWaterConfig = {
   handoffThickness: 0.75,
   evaporationRate: 0.0032,
-  spreadRate: 0.72,
-  settlingRate: 0.24,
-  maxSpreadVelocity: 2.35,
+  spreadRate: 2.4,
+  settlingRate: 0.045,
+  maxSpreadVelocity: 4.5,
+  gravity: 4.0,
+  frictionCoefficient: 0.5,
 };
 
 /**
@@ -294,15 +313,17 @@ export function createEmptyShallowColumn(): ShallowColumnState {
     spreadVX: 0,
     spreadVZ: 0,
     settled: 0,
-    adhesion: 0.5,
+    adhesion: 0.22,
     age: 0,
     emitterId: 0,
     handoffPending: false,
     ownershipDomain: "none",
+    pendingOwnershipDomain: "none",
     ownershipConfidence: 0,
     ownershipTicks: 0,
     lastResolvedTick: 0,
     authority: "bootstrap",
+    supportPinned: false,
     handoffGraceTicks: 0,
   };
 }

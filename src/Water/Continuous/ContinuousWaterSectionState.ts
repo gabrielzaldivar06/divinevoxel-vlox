@@ -777,7 +777,8 @@ export function performContinuousWaterHandoffs(
     for (let z = 0; z < section.sizeZ; z++) {
       for (let x = 0; x < section.sizeX; x++) {
         const column = section.columns[colIdx(section.sizeX, x, z)];
-        const forceShallowTransfer = column.ownershipDomain === "shallow";
+        const forceShallowTransfer =
+          (column.pendingOwnershipDomain ?? column.ownershipDomain) === "shallow";
         if (
           !column.active ||
           !canContinuousColumnHandoff(column) ||
@@ -799,6 +800,7 @@ export function performContinuousWaterHandoffs(
         );
         if (acceptedMass <= 0.0001) {
           column.handoffPending = forceShallowTransfer || column.handoffPending;
+          column.pendingOwnershipDomain = "continuous";
           rejectedCount += 1;
           continue;
         }
@@ -814,6 +816,7 @@ export function performContinuousWaterHandoffs(
           column.surfaceY = column.bedY + column.depth;
           column.pressure = column.depth;
           column.handoffPending = false;
+          column.pendingOwnershipDomain = "continuous";
           column.ownershipTicks = 0;
           column.handoffGraceTicks = HANDOFF_GRACE_TICKS;
         }

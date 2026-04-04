@@ -76,6 +76,7 @@ function makeEmptyVisualColumn(): ShallowVisualColumnState {
     deepBlend: 0,
     handoffBlend: 0,
     emitterId: 0,
+    turbidity: 0,
     handoffPending: false,
     ownershipDomain: "none",
     authority: "bootstrap",
@@ -90,6 +91,7 @@ type VisualNeighborhood = {
   weightedFoam: number;
   weightedEdge: number;
   weightedRipple: number;
+  weightedTurbidity: number;
   weightedFlowX: number;
   weightedFlowZ: number;
   weightedFlowSpeed: number;
@@ -158,6 +160,7 @@ function sampleVisualNeighborhood(
     weightedFoam: 0,
     weightedEdge: 0,
     weightedRipple: 0,
+    weightedTurbidity: 0,
     weightedFlowX: 0,
     weightedFlowZ: 0,
     weightedFlowSpeed: 0,
@@ -176,7 +179,7 @@ function sampleVisualNeighborhood(
       const neighbor = getVisualColumn(columns, sizeX, sizeZ, x + dx, z + dz);
       if (!neighbor?.active || neighbor.coverage <= 0) continue;
       const weight =
-        (dx === 0 && dz === 0 ? 0.42 : dx === 0 || dz === 0 ? 0.14 : 0.08) *
+        (dx === 0 && dz === 0 ? 0.42 : dx === 0 || dz === 0 ? 0.14 : 0.12) *
         Math.max(0.08, neighbor.coverage + neighbor.wetness * 0.25);
       out.totalWeight += weight;
       out.weightedBedY += neighbor.bedY * weight;
@@ -185,6 +188,7 @@ function sampleVisualNeighborhood(
       out.weightedFoam += neighbor.foam * weight;
       out.weightedEdge += neighbor.edgeStrength * weight;
       out.weightedRipple += neighbor.microRipple * weight;
+      out.weightedTurbidity += neighbor.turbidity * weight;
       out.weightedFlowX += neighbor.flowX * weight;
       out.weightedFlowZ += neighbor.flowZ * weight;
       out.weightedFlowSpeed += neighbor.flowSpeed * weight;
@@ -295,6 +299,35 @@ function buildVisualColumn(
   const active = column.active && column.ownershipDomain === "shallow" && column.thickness > 0;
   const bedY = Number.isFinite(column.bedY) ? column.bedY : grid.terrainY;
   const surfaceY = active ? (Number.isFinite(column.surfaceY) ? column.surfaceY : bedY + column.thickness) : bedY;
+
+  // Surface-nets terrain compensation: on slopes the rendered terrain mesh
+  // extends above the integer voxel boundary (bedY). Lift the visual water
+  // surface proportionally to the local terrain slope so the film never
+  // clips into the terrain mesh.
+  let terrainSlopeLift = 0;
+  if (active) {
+    let maxNeighborBedY = bedY;
+    const sx = grid.sizeX;
+    const sz = grid.sizeZ;
+    if (x > 0) {
+      const nb = grid.columns[getColumnIndex(sx, x - 1, z)];
+      if (Number.isFinite(nb.bedY)) maxNeighborBedY = Math.max(maxNeighborBedY, nb.bedY);
+    }
+    if (x < sx - 1) {
+      const nb = grid.columns[getColumnIndex(sx, x + 1, z)];
+      if (Number.isFinite(nb.bedY)) maxNeighborBedY = Math.max(maxNeighborBedY, nb.bedY);
+    }
+    if (z > 0) {
+      const nb = grid.columns[getColumnIndex(sx, x, z - 1)];
+      if (Number.isFinite(nb.bedY)) maxNeighborBedY = Math.max(maxNeighborBedY, nb.bedY);
+    }
+    if (z < sz - 1) {
+      const nb = grid.columns[getColumnIndex(sx, x, z + 1)];
+      if (Number.isFinite(nb.bedY)) maxNeighborBedY = Math.max(maxNeighborBedY, nb.bedY);
+    }
+    const slopeRise = maxNeighborBedY - bedY;
+    terrainSlopeLift = Math.min(0.45, Math.max(0, slopeRise) * 0.45);
+  }
   const shoreDist = computeShoreDist(grid, x, z, ghosts);
   const diagonalNeighbors = countDiagonalShallowNeighbors(grid, x, z);
   const thickness = active ? Math.max(0, column.thickness) : 0;
@@ -385,6 +418,18 @@ function buildVisualColumn(
           patch.handoffBlend * 0.08,
       )
     : 0;
+  // Turbidity: increases when water is disturbed/flowing, decays when settled.
+  // motion = flow01 computed above; calmness = settled.
+  const turbidity = active
+    ? clamp01(motion * 0.58 + breakup * 0.28 + (1 - calmness) * 0.14)
+    : 0;
+  const runtimeHandoffIntent =
+    active &&
+    ((column.pendingOwnershipDomain ?? column.ownershipDomain) === "continuous" ||
+      column.handoffPending);
+  const visualHandoffBlend = runtimeHandoffIntent
+    ? patch.handoffBlend
+    : patch.handoffBlend * 0.22;
 
   out.active = active;
   out.patchId = patch.patchId;
@@ -396,7 +441,7 @@ function buildVisualColumn(
   out.patchConnectivity = patch.connectivity;
   out.patchCompactness = patch.compactness;
   out.patchBoundaryRatio = patch.boundaryRatio;
-  out.patchHandoffReady = patch.handoffReady;
+  out.patchHandoffReady = patch.handoffReady && runtimeHandoffIntent;
   out.localNeighborCount = patch.localNeighborCount;
   out.localCore = patch.localCore;
   out.thickness = thickness;
@@ -411,14 +456,14 @@ function buildVisualColumn(
             (0.08 +
               patch.mergeBlend * 0.16 +
               patch.deepBlend * 0.22 +
-              patch.handoffBlend * 0.12),
+              visualHandoffBlend * 0.12),
       )
     : bedY;
   out.visualSurfaceY = active
     ? lerp(
-        bedY + filmThickness,
-        targetVolumeSurface,
-        clamp01(patch.mergeBlend * 0.34 + patch.deepBlend * 0.42 + patch.handoffBlend * 0.24),
+        bedY + filmThickness + terrainSlopeLift,
+        targetVolumeSurface + terrainSlopeLift,
+        clamp01(patch.mergeBlend * 0.34 + patch.deepBlend * 0.42 + visualHandoffBlend * 0.24),
       )
     : bedY;
   out.filmThickness = filmThickness;
@@ -438,9 +483,10 @@ function buildVisualColumn(
   out.wetness = wetness;
   out.breakup = breakup;
   out.microRipple = microRipple;
+  out.turbidity = turbidity;
   out.mergeBlend = patch.mergeBlend;
   out.deepBlend = patch.deepBlend;
-  out.handoffBlend = patch.handoffBlend;
+  out.handoffBlend = visualHandoffBlend;
   out.emitterId = active ? Math.max(0, column.emitterId) : 0;
   out.handoffPending = active ? column.handoffPending : false;
   out.ownershipDomain = column.ownershipDomain;
@@ -502,6 +548,7 @@ export function buildShallowWaterFilmSectionRenderData(
       const neighborhoodFoam = clamp01(neighborhood.weightedFoam / neighborhood.totalWeight);
       const neighborhoodEdge = clamp01(neighborhood.weightedEdge / neighborhood.totalWeight);
       const neighborhoodRipple = clamp01(neighborhood.weightedRipple / neighborhood.totalWeight);
+      const neighborhoodTurbidity = clamp01(neighborhood.weightedTurbidity / neighborhood.totalWeight);
       const neighborhoodFlowX = neighborhood.weightedFlowX / neighborhood.totalWeight;
       const neighborhoodFlowZ = neighborhood.weightedFlowZ / neighborhood.totalWeight;
       const neighborhoodFlowSpeed = Math.max(
@@ -598,6 +645,11 @@ export function buildShallowWaterFilmSectionRenderData(
           targetVolumeSurface,
           clamp01(column.mergeBlend * 0.42 + column.deepBlend * 0.33 + column.handoffBlend * 0.25),
         );
+        // Turbidity decays toward neighbourhood; settled calmness accelerates decay.
+        const colMotion = clamp01(column.flowSpeed / Math.max(0.0001, DEFAULT_SHALLOW_WATER_CONFIG.maxSpreadVelocity));
+        column.turbidity = clamp01(
+          lerp(column.turbidity * 0.82, neighborhoodTurbidity, 0.28 + colMotion * 0.08),
+        );
         continue;
       }
 
@@ -628,6 +680,7 @@ export function buildShallowWaterFilmSectionRenderData(
       column.age = 0;
       column.shoreDist = SHORE_DISTANCE_MAX;
       column.breakup = clamp01(neighborhoodEdge * 0.3);
+      column.turbidity = 0;
       column.patchId = -1;
       column.patchTotalMass = 0;
       column.patchArea = 0;

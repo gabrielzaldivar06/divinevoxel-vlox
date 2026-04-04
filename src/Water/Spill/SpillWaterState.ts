@@ -78,6 +78,7 @@ function createEmitter(request: SpillTransferRequest): SpillEmitterRuntime {
     worldZ: request.worldZ,
     flowRate: request.mass / Math.max(travelTimeSeconds, MIN_TRAVEL_TIME_SECONDS),
     fallHeight,
+    fxProfile: request.fxProfile ?? "default",
     sourceSectionKey: request.sourceSectionKey,
     targetSectionKey: request.targetSectionKey,
     sourceDomain: request.sourceDomain,
@@ -161,6 +162,7 @@ export function updateSpillWater(
             emitter.landingSurfaceY,
             emitter.remainingMass,
             emitter.id,
+            emitter,
           )
         : landingCallbacks.landToShallow(
             emitter.worldX,
@@ -168,6 +170,7 @@ export function updateSpillWater(
             emitter.landingSurfaceY,
             emitter.remainingMass,
             emitter.id,
+            emitter,
           );
 
     const acceptedMass = Math.max(0, Math.min(acceptedMassRaw, emitter.remainingMass));
